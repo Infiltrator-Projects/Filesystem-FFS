@@ -287,7 +287,7 @@ static int overwrite_existing(const IfsFfsDropInVolume *volume,
         io->read.context != volume->io.context ||
         io->read.volume_bytes != volume->io.volume_bytes ||
         io->read.block_bytes != volume->io.block_bytes ||
-        module_mount(&live, &io->read) != 0 ||
+        mount_volume(&live, &io->read) != 0 ||
         live.root_block != volume->root_block ||
         live.variant_flags != volume->variant_flags ||
         live.blocks != volume->blocks ||
