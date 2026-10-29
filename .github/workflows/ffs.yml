@@ -1,0 +1,15 @@
+name: Independent FFS shared-object qualification
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  ffs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Build FFS.so V1/V2 and run original independent DOS1/3/5 core/media tests
+        run: make test
