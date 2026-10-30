@@ -5,6 +5,7 @@
 #define IFS_FFS_FIXTURE_V1_H
 #include <stdint.h>
 #include <stddef.h>
+#include "ifs_defrag_services_v1.h"
 #define IFS_FFS_FIXTURE_ABI_V1 1U
 #define IFS_FFS_FIXTURE_CAP_FORMAT UINT64_C(1)
 #define IFS_FFS_FIXTURE_CAP_POPULATE UINT64_C(2)
@@ -17,10 +18,10 @@ typedef struct {
     uint32_t abi_version, structure_bytes;
     const char *format_id;
     uint64_t capabilities;
-    int (*format)(const char *, const char *);
-    int (*populate)(const char *, const IfsFfsFragmentProfile *);
-    int (*verify)(const char *, const IfsFfsFragmentProfile *, char *, size_t);
-    int (*verify_after)(const char *, const IfsFfsFragmentProfile *, char *, size_t);
+    int (*format)(const char *, const char *, const IfsDefragServicesV1 *);
+    int (*populate)(const char *, const IfsFfsFragmentProfile *, const IfsDefragServicesV1 *);
+    int (*verify)(const char *, const IfsFfsFragmentProfile *, char *, size_t, const IfsDefragServicesV1 *);
+    int (*verify_after)(const char *, const IfsFfsFragmentProfile *, char *, size_t, const IfsDefragServicesV1 *);
 } IfsFfsFixtureV1;
 const IfsFfsFixtureV1 *infiltrator_filesystem_ffs_fixture_v1(void);
 #endif
