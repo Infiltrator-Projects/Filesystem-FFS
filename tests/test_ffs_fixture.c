@@ -31,7 +31,7 @@ int main(void) {
        api->structure_bytes<sizeof(*api) ||
        !api->format_id || strcmp(api->format_id,"ffs") ||
        api->capabilities!=(IFS_FFS_FIXTURE_CAP_FORMAT|IFS_FFS_FIXTURE_CAP_POPULATE|IFS_FFS_FIXTURE_CAP_VERIFY) ||
-       !api->format || !api->populate || !api->verify || !api->verify_after)goto done;
+       !api->format || !api->validate || !api->populate || !api->verify || !api->verify_after)goto done;
     IfsDefragServicesV1 services={.abi_version=IFS_DEFRAG_SERVICES_V1,
         .structure_bytes=sizeof(IfsDefragServicesV1),
         .ld_bitmap_calloc=bits_alloc,.ld_bitmap_get=bits_get,.ld_bitmap_set=bits_set};
@@ -39,6 +39,7 @@ int main(void) {
        .directory_initial=0,.directory_second=4};
     char detail[512]={0};
     if(api->format(path,"FFS_UNIT",&services)!=0){fputs("format rejected 16MiB fixture\n",stderr);goto done;}
+    if(api->validate(path,&services)!=0){fputs("format validation failed\\n",stderr);goto done;}
     if(api->populate(path,&p,&services)!=0){fputs("population rejected 16MiB fixture\n",stderr);goto done;}
     if(api->verify(path,&p,detail,sizeof(detail),&services)!=0) {
         fprintf(stderr,"FFS fragment corpus verification: %s\n",detail);
