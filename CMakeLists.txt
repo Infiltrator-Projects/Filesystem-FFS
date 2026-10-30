@@ -18,6 +18,8 @@ add_library(ffs-unified SHARED
     "${FFS}/module/ffs_module.c"
     "${FFS}/core/ffs_core.c" "${FFS}/core/ffs_primitives.c"
     "${DEF}/affs_native.c" "${DEF}/affs_worker.c"
+    native/fixtures/ffs_format.c native/fixtures/ffs_payload.c
+    native/fixtures/fixture_profile.c module/ffs_fixture_module.c
     compat/legacy_services.c compat/runtime_alloc.c
     module/ffs_defrag_module.c)
 set_source_files_properties("${DEF}/affs_worker.c" PROPERTIES
