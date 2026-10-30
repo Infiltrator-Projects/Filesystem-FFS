@@ -22,8 +22,8 @@ int main(void) {
     IfsFfsFragmentProfile p={.files=8,.chunks=3,.chunk_kib=4,
        .directory_initial=0,.directory_second=4};
     char detail[512]={0};
-    if(api->format(path,"FFS_UNIT")!=0)goto done;
-    if(api->populate(path,&p)!=0)goto done;
+    if(api->format(path,"FFS_UNIT")!=0){fputs("format rejected 16MiB fixture\n",stderr);goto done;}
+    if(api->populate(path,&p)!=0){fputs("population rejected 16MiB fixture\n",stderr);goto done;}
     if(api->verify(path,&p,detail,sizeof(detail))!=0) {
         fprintf(stderr,"FFS fragment corpus verification: %s\n",detail);
         goto done;
