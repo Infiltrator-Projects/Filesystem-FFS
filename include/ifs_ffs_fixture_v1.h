@@ -19,6 +19,7 @@ typedef struct {
     const char *format_id;
     uint64_t capabilities;
     int (*format)(const char *, const char *, const IfsDefragServicesV1 *);
+    int (*validate)(const char *, const IfsDefragServicesV1 *);
     int (*populate)(const char *, const IfsFfsFragmentProfile *, const IfsDefragServicesV1 *);
     int (*verify)(const char *, const IfsFfsFragmentProfile *, char *, size_t, const IfsDefragServicesV1 *);
     int (*verify_after)(const char *, const IfsFfsFragmentProfile *, char *, size_t, const IfsDefragServicesV1 *);
