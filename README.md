@@ -1,10 +1,33 @@
 # Filesystem-FFS
 
-**Canonical source owner:** independent AmigaDOS Fast File System implementation for InfiltratorOS. Source and original unit tests imported, file-for-file, from `Infiltrator-Projects/Filesystems` branch commit `c0ca29597293c1bc4a7cef231dffe37f57722e8c`, including its existing freestanding DOS1/3/5 `FFS.so` V1/V2 implementation.
+Canonical independent AmigaDOS Fast File System driver for InfiltratorOS. FFS is
+distinct from OFS (Original File System); neither driver's on-disk algorithms
+belong inside Defragmenter.
 
-- `native/filesystems/ffs/core/` is the format-specific canonical implementation.
-- `native/filesystems/ffs/module/` is an independent freestanding FFS.so reader and bounded existing-file overwrite implementation.
-- `native/filesystems/ffs/linux/` is the project-owned separate FFS Linux driver implementation.
-- `tests/ffs_*` contains the imported FFS qualification fixtures and tests.
+The **default `make` output is the unified `FFS.so`**, and the CMake
+`ffs-unified` target produces the same module. It exposes the original
+freestanding read-only V1 API and bounded existing-file overwrite V2 API,
+plus the separately versioned native FFS Defrag/Recover V1 and Test Media
+format/populate/verify V1 interfaces. The Linux host provides generic I/O,
+identity/stop controls and journal services over typed ABIs. No application
+fallback to private FFS filesystem source is permitted.
 
-`make test` builds and runs the native SO and tests on disposable memory/media, never altering boot devices. **Not claimed complete:** full shared-object namespace mutation, complete format support, crash-safe writes, EFI driver, universal BOOT/kernel SO loader or physically qualified root installations. Do not substitute OFS data-header logic for FFS raw data blocks.
+- `native/filesystems/ffs/core/` and `native/filesystems/ffs/module/` own
+  the independent freestanding read API and limited overwrite logic
+- `native/defrag/` owns the scanner, FFS allocation planner, relayout,
+  journalling and recovery implementation migrated from Defragmenter
+- `native/fixtures/` owns disposable-image formatting, fragmented file
+  population, and payload verification
+- `module/` contains the independently callable defragmentation and
+  Test Media interfaces
+- `tests/` validates the reader and a disposable fragmented FFS image
+
+Run `make test` to qualify both the legacy **FFS-legacy.so** ABI and the
+unified **FFS.so** formatter, payload, and API exports. The Makefile keeps
+the legacy test artifact separate; it must not overwrite the distributable
+driver.
+
+This project does **not** claim universal EFI/BOOT/kernel loading, fully
+qualified boot-device modification, or unlimited AmigaDOS variants.
+Only the tested native DOS1/DOS3/DOS5 subset is supported by the current
+mutation path. Do not apply OFS data-header logic to FFS raw data blocks.
