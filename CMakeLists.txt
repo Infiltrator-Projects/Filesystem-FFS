@@ -35,7 +35,8 @@ target_link_libraries(ffs-unified PRIVATE InfiltratrCommon::Common OpenSSL::Cryp
 set_target_properties(ffs-unified PROPERTIES PREFIX "" OUTPUT_NAME "FFS" SUFFIX ".so")
 if(BUILD_TESTING)
     add_executable(ffs-fixture-test tests/test_ffs_fixture.c)
-    target_include_directories(ffs-fixture-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_include_directories(ffs-fixture-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
+        "${CMAKE_CURRENT_SOURCE_DIR}/compat")
     target_link_libraries(ffs-fixture-test PRIVATE ffs-unified)
     add_test(NAME ffs-fixture-test COMMAND ffs-fixture-test)
 endif()
