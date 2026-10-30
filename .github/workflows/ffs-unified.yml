@@ -1,0 +1,23 @@
+name: Native FFS.so migration qualification
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-ffs:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Install native prerequisites
+        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libssl-dev
+      - name: Verify legacy freestanding reader remains intact
+        run: make test
+      - name: Build candidate unified FFS.so without separate filesystem worker
+        run: |
+          cmake -S . -B build-unified -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF
+          cmake --build build-unified --target ffs-unified --parallel 2
+          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v1'
+          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v2'
+          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_ffs_defrag_v1'
