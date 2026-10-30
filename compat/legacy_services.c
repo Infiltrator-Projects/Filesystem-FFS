@@ -109,3 +109,16 @@ bool ld_device_matches_identity(const LdDevice *d,const char *id,uint64_t size) 
  if(active)return active->ld_device_matches_identity(d,id,size);
  errno=ENOSYS;return false;
 }
+
+/* Fixture APIs may run against disposable regular images with only bitmap
+ * host services. The normal defrag operation requires the full safety table. */
+int ifs_bind_fixture_services(const IfsDefragServicesV1 *s) {
+    if(!s || active || s->abi_version != IFS_DEFRAG_SERVICES_V1 ||
+       s->structure_bytes < sizeof(*s) || !s->ld_bitmap_calloc ||
+       !s->ld_bitmap_get || !s->ld_bitmap_set) {
+        errno=EINVAL;
+        return -1;
+    }
+    active=s;
+    return 0;
+}
