@@ -12,6 +12,9 @@ FetchContent_Declare(infiltratr_common
     GIT_REPOSITORY https://github.com/Infiltrator-Projects/Libraries.git
     GIT_TAG c76ec95ef66fc728df6a906ad75a6a4dd63b419b)
 FetchContent_MakeAvailable(infiltratr_common)
+# Common is a link-time dependency; its development files must not be installed
+# by this standalone filesystem package.
+set_property(DIRECTORY "${infiltratr_common_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_ALL TRUE)
 set(FFS "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs")
 set(DEF "${CMAKE_CURRENT_SOURCE_DIR}/native/defrag")
 add_library(ffs-unified SHARED
