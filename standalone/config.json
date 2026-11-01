@@ -1,0 +1,7 @@
+{
+  "repository": "Filesystem-FFS",
+  "module": "FFS.so",
+  "pdf": "docs/FFS.pdf",
+  "abi": "infiltrator_filesystem_ffs_defrag_v1",
+  "build_system": "cmake"
+}
