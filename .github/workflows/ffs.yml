@@ -21,10 +21,7 @@ jobs:
           stage="$(mktemp -d)"
           trap 'rm -rf "$stage"' EXIT
           DESTDIR="$stage" cmake --install build/cmake-unified
-          actual="$(cd "$stage" && find . -type f -printf '%P\\n' | LC_ALL=C sort)"
-          expected="$(printf '%s\\n' 'System/Filesystems/FFS.so' 'System/Resources/Documentation/Filesystem-FFS/FFS.pdf' | LC_ALL=C sort)"
-          if [[ "$actual" != "$expected" ]]; then
-            printf 'Incorrect installed payload:\\n%s\\n' "$actual"
-            exit 1
-          fi
+          test "$(find "$stage" -type f | wc -l)" -eq 2
+          test -f "$stage/System/Filesystems/FFS.so"
+          test -f "$stage/System/Resources/Documentation/Filesystem-FFS/FFS.pdf"
           test "$(head -c 5 "$stage/System/Resources/Documentation/Filesystem-FFS/FFS.pdf")" = '%PDF-'
