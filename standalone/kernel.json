@@ -1,0 +1,7 @@
+{
+  "name": "ffs",
+  "directory": "native/filesystems/ffs/linux",
+  "paths": [
+    "native/filesystems/ffs"
+  ]
+}
