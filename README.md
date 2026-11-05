@@ -35,7 +35,7 @@ mutation path. Do not apply OFS data-header logic to FFS raw data blocks.
 ## Installer files
 
 - `/System/Filesystems/FFS.so`
-- `/System/Resources/Documentation/Filesystem-FFS/FFS.pdf`
+- `/System/Resources/Documentation/Filesystem-FFS.pdf`
 - `/System/Kernel/Filesystems/ffs.ko`
 
 The published Debian package installs these three regular files. A manual native RUN compiles the shared object and Linux adapter locally, generates the PDF, and replaces all three files. It uses the running kernel headers by default. Use `--kernel-build DIRECTORY` for a prepared kernel build with `Module.symvers`. The kernel module is stored for manual use.

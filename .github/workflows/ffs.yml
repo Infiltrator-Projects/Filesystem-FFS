@@ -23,5 +23,5 @@ jobs:
           DESTDIR="$stage" cmake --install build/cmake-unified
           test "$(find "$stage" -type f | wc -l)" -eq 2
           test -f "$stage/System/Filesystems/FFS.so"
-          test -f "$stage/System/Resources/Documentation/Filesystem-FFS/FFS.pdf"
-          test "$(head -c 5 "$stage/System/Resources/Documentation/Filesystem-FFS/FFS.pdf")" = '%PDF-'
+          test -f "$stage/System/Resources/Documentation/Filesystem-FFS.pdf"
+          test "$(head -c 5 "$stage/System/Resources/Documentation/Filesystem-FFS.pdf")" = '%PDF-'

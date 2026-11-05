@@ -46,4 +46,4 @@ endif()
 install(TARGETS ffs-unified LIBRARY DESTINATION /System/Filesystems)
 # Install only this filesystem's illustrated PDF beside its native shared object.
 install(FILES "${CMAKE_CURRENT_SOURCE_DIR}/docs/FFS.pdf"
-        DESTINATION /System/Resources/Documentation/Filesystem-FFS)
+        DESTINATION /System/Resources/Documentation RENAME Filesystem-FFS.pdf)
