@@ -1,0 +1,8 @@
+{
+  "name": "ffs",
+  "directory": "native/filesystems/ffs/linux",
+  "paths": [
+    "native/filesystems/ffs",
+    "native/platform/linux_kernel/vfs_compat.h"
+  ]
+}

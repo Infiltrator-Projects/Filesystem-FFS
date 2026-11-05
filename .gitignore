@@ -1,5 +1,3 @@
-/build/
-*.o
-*.ko
-*.so
-*.efi
+
+kernel-source/
+__pycache__/
