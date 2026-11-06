@@ -1,62 +1,162 @@
-0.06 0.12 0.20 rg 0 744 595 98 re f
-0.02 0.58 0.60 rg 48 741 87 4 re f
-BT /F2 12 Tf 0.65 0.87 0.91 rg 1 0 0 1 48 801 Tm (INFILTRATOR / FILESYSTEMS) Tj ET
-BT /F2 20 Tf 1 1 1 rg 1 0 0 1 48 771 Tm (FFS - format and project guide) Tj ET
-0.94 0.97 0.97 rg 48 674 498 46 re f
-BT /F2 14 Tf 0.02 0.42 0.47 rg 1 0 0 1 61 699 Tm (FILESYSTEM BUILD GUIDE) Tj ET
-BT /F1 10 Tf 0.07 0.14 0.24 rg 1 0 0 1 61 683 Tm (Portable Debian package and locally compiled native installer.) Tj ET
-BT /F2 14 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 642 Tm (WHAT IS IT?) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 615 Tm (Amiga Fast File System, distinct from OFS; uses raw data blocks rather than) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 596 Tm (OFS data headers.) Tj ET
-BT /F2 13 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 549 Tm (CONCEPTUAL ON-DISK STRUCTURE) Tj ET
-BT /F1 10 Tf 0.35 0.42 0.47 rg 1 0 0 1 48 526 Tm (Format-specific structures vary; this is not a sector map.) Tj ET
-0.06 0.44 0.49 rg 48 445 116 62 re f
-BT /F2 11 Tf 1 1 1 rg 1 0 0 1 60 478 Tm (MEDIA) Tj ET
-BT /F1 9 Tf 0.9 0.96 0.97 rg 1 0 0 1 60 459 Tm (stage 1) Tj ET
-0.09 0.52 0.56 rg 175 445 116 62 re f
-BT /F2 11 Tf 1 1 1 rg 1 0 0 1 187 478 Tm (METADATA) Tj ET
-BT /F1 9 Tf 0.9 0.96 0.97 rg 1 0 0 1 187 459 Tm (stage 2) Tj ET
-0.12 0.62 0.57 rg 302 445 116 62 re f
-BT /F2 11 Tf 1 1 1 rg 1 0 0 1 314 478 Tm (ALLOCATION) Tj ET
-BT /F1 9 Tf 0.9 0.96 0.97 rg 1 0 0 1 314 459 Tm (stage 3) Tj ET
-0.16 0.42 0.53 rg 429 445 116 62 re f
-BT /F2 11 Tf 1 1 1 rg 1 0 0 1 441 478 Tm (PAYLOAD) Tj ET
-BT /F1 9 Tf 0.9 0.96 0.97 rg 1 0 0 1 441 459 Tm (stage 4) Tj ET
-BT /F2 14 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 406 Tm (SOURCE AND QUALIFICATION) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 381 Tm (Filesystem-FFS has an independent Infiltrator-Projects source repository.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 362 Tm (The Debian package records the source revision and payload checksums.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 343 Tm (Driver capabilities and media compatibility are described in the source) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 49 324 Tm (qualification reports.) Tj ET
-BT /F2 14 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 288 Tm (TARGET INSTALLATION LAYOUT) Tj ET
-0.94 0.97 0.97 rg 48 183 498 86 re f
-BT /F1 10 Tf 0.07 0.14 0.24 rg 1 0 0 1 62 247 Tm (/System/Filesystems/FFS.so) Tj ET
-BT /F1 10 Tf 0.07 0.14 0.24 rg 1 0 0 1 62 225 Tm (/System/Resources/Documentation/) Tj ET
-BT /F2 11 Tf 0.02 0.48 0.52 rg 1 0 0 1 62 204 Tm (FFS.pdf) Tj ET
-BT /F1 10 Tf 0.35 0.42 0.47 rg 1 0 0 1 48 149 Tm (The installation page gives the exact packaged file paths.) Tj ET
-BT /F1 10 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 101 Tm (Engineering source and qualification reports belong in GitHub.) Tj ET
-0.82 0.85 0.86 rg 48 61 500 1 re f
-BT /F1 9 Tf 0.34 0.39 0.43 rg 1 0 0 1 48 40 Tm (Filesystem-FFS  |  Preliminary user guide  |  30 October 2026) Tj ET
-
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 01) Tj ET
+BT /F2 12 Tf 0.02 0.50 0.55 rg 1 0 0 1 50 694.0 Tm (OFFICIAL FORMAT / CHRONOLOGY / ENGINEERING) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 650.0 Tm (The AmigaOS FFS format accelerated disk access by removing the per-data-block header) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 633.0 Tm (required by the original OFS format.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 603.0 Tm (This guide documents the original format's technical architecture, history and independent) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 586.0 Tm (source references. InfiltratorOS modules and install packages are implementation) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 569.0 Tm (artefacts, not the authority for the historic on-disk definition.) Tj ET
+BT /F2 12 Tf 0.02 0.50 0.55 rg 1 0 0 1 50 539.0 Tm (CONCEPTUAL MEDIA MAP) Tj ET
+0.05 0.36 0.47 rg 50 455 238 67 re f
+BT /F2 11 Tf 1 1 1 rg 1 0 0 1 62 487.0 Tm (BOOT / DOS1) Tj ET
+BT /F1 8.5 Tf 0.85 0.97 0.97 rg 1 0 0 1 62 468.0 Tm (Fast filesystem type) Tj ET
+0.08 0.39 0.49 rg 301 455 238 67 re f
+BT /F2 11 Tf 1 1 1 rg 1 0 0 1 313 487.0 Tm (ROOT + BITMAP) Tj ET
+BT /F1 8.5 Tf 0.85 0.97 0.97 rg 1 0 0 1 313 468.0 Tm (Volume directory and allocation) Tj ET
+0.10 0.43 0.52 rg 50 373 238 67 re f
+BT /F2 11 Tf 1 1 1 rg 1 0 0 1 62 405.0 Tm (FILE HEADERS) Tj ET
+BT /F1 8.5 Tf 0.85 0.97 0.97 rg 1 0 0 1 62 386.0 Tm (Hash links + data block references) Tj ET
+0.13 0.46 0.54 rg 301 373 238 67 re f
+BT /F2 11 Tf 1 1 1 rg 1 0 0 1 313 405.0 Tm (RAW DATA BLOCKS) Tj ET
+BT /F1 8.5 Tf 0.85 0.97 0.97 rg 1 0 0 1 313 386.0 Tm (Full block used for file payload) Tj ET
+BT /F2 12 Tf 0.02 0.50 0.55 rg 1 0 0 1 50 332.0 Tm (CONTENTS) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 305.0 Tm (1. Historical chronology) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 282.0 Tm (2. Original on-disk architecture) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 259.0 Tm (3. Allocation and directories) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 236.0 Tm (4. Integrity and recovery) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 213.0 Tm (5. Design rationale and limitations) Tj ET
+BT /F1 10.4 Tf 0.07 0.16 0.23 rg 1 0 0 1 51 190.0 Tm (6. InfiltratorOS integration boundary) Tj ET
 %%Page
-0.06 0.12 0.20 rg 0 744 595 98 re f
-BT /F2 20 Tf 1 1 1 rg 1 0 0 1 48 778 Tm (Build and installation) Tj ET
-BT /F2 14 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 700 Tm (Filesystem-FFS) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 673 Tm (Release @VERSION@) Tj ET
-BT /F2 13 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 620 Tm (Installed files) Tj ET
-BT /F3 8 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 591 Tm (/System/Filesystems/FFS.so) Tj ET
-BT /F3 8 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 568 Tm (/System/Resources/Documentation/Filesystem-FFS.pdf) Tj ET
-BT /F3 8 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 545 Tm (/System/Kernel/Filesystems/ffs.ko) Tj ET
-BT /F2 13 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 475 Tm (Debian package) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 450 Tm (Install the prebuilt files with dpkg -i followed by the Debian filename.) Tj ET
-BT /F2 13 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 400 Tm (Manual RUN) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 375 Tm (Run bash followed by the native installer filename.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 353 Tm (The installer compiles the shared object and generates this manual locally.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 331 Tm (It also compiles the Linux adapter against the running kernel headers.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 309 Tm (Use --kernel-build DIRECTORY to select another prepared kernel build.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 287 Tm (The manual installer replaces all three files.) Tj ET
-BT /F2 13 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 239 Tm (InfiltratorOS installation) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 214 Tm (The OS installer builds a missing or older shared object.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 192 Tm (It verifies the manual independently and repairs it from its matching release.) Tj ET
-BT /F1 11 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 170 Tm (The kernel module is stored for manual use under its single filename.) Tj ET
-BT /F1 10 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 110 Tm (The package metadata records the source revision and SHA-256 checksums.) Tj ET
-BT /F1 9 Tf 0.07 0.14 0.24 rg 1 0 0 1 48 40 Tm (Filesystem-FFS | Build guide | @VERSION@) Tj ET
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 02) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (HISTORICAL CHRONOLOGY) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (The first Amiga machines shipped in 1985 with the Original File System \(OFS\). When larger) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (hard disks and applications required better sequential throughput, Amiga Fast File System) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (was introduced in the late 1980s and became associated with AmigaOS 1.3-era hard disk use.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (It was a storage format change, not simply a faster driver reading exactly the same OFS) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 608.0 Tm (file data blocks.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (Historical AmigaDOS types identify Fast File System variants: DOS1 for original FFS, DOS3) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (for international case handling and DOS5 for directory-cache support. Later long-name) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 544.0 Tm (extensions added further modes. The AmigaOS and Linux AFFS documents distinguish these) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 527.0 Tm (on-media variations and support limitations; a reader must detect the actual DOS type) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 510.0 Tm (before interpreting data.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 03) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (ORIGINAL ON-DISK ARCHITECTURE) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS preserves the Amiga model of boot blocks, root block, allocation bitmap, hashed) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (directory structures, file headers and extension blocks. The decisive difference from OFS) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (is that FFS ordinary file data blocks contain raw file payload rather than the 24-byte OFS) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (data header. A data block can therefore carry more useful bytes and be accessed more) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 608.0 Tm (efficiently.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (File header blocks and extension blocks contain the table of data-block pointers. Because) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (FFS does not retain OFS data-block headers containing reverse information, damaged file) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 544.0 Tm (headers may make recovery of payload ownership more difficult. The root and metadata) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 527.0 Tm (blocks still have structured fields and checksums, but ordinary FFS file payload blocks) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 510.0 Tm (are not equivalent to checksummed OFS records.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 04) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (ALLOCATION AND DIRECTORIES) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (The allocation bitmap records available blocks. Directories use hash-table slots and) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (chains of file or directory header blocks, with Amiga metadata including names,) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (protections, timestamps and file comments. File extension blocks expand the pointer) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (capacity when a file exceeds what its header can describe. The storage layout must be) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 608.0 Tm (interpreted with the correct block size and partition origin.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (FFS reuses much of the Amiga namespace model but can differ between international,) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (directory-cache and long-name types. Case folding, caching state and name limits are) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 544.0 Tm (mode-dependent. Hard-link and symbolic-link representations are not automatically) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 527.0 Tm (identical to the full semantics of a Unix VFS.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 05) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (INTEGRITY AND RECOVERY) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS does not have a general journal comparable to ext3 or NTFS. The root block can contain) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (a bitmap-valid flag, and metadata must be checked before write access after an interrupted) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (operation. File data no longer has the OFS header and checksum redundancy, so recovery) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (relies more heavily on trustworthy file header and extension-block references.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (A checker should validate directory hash chains, file headers, bitmap use, checksum) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (fields, block ownership and reference completeness. Reconstruction from raw data is) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (inherently more speculative than on OFS because ownership sequence numbers are not) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 544.0 Tm (available in each data block. The ability to recover a partly overwritten file must not be) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 527.0 Tm (exaggerated.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 06) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (DESIGN RATIONALE AND LIMITATIONS) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS trades some of OFS's per-block redundancy for greater throughput and data capacity per) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (block, an appropriate choice for hard disks. The format remains bitmap-and-header based) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (rather than a FAT or B-tree filesystem. Its layout must account for reserved blocks and) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (the root block's geometry.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (A modern implementation should support multiple legitimate block sizes, DOS types and) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (Amiga partitioning conventions, including RDB. Neither an Amiga filesystem name nor a) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (partition size is sufficient to identify data-block semantics. The FFS improvements did) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 544.0 Tm (not add end-to-end checksums or a full modern transaction model.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 07) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (INFILTRATOROS INTEGRATION BOUNDARY) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS.so and OFS.so are distinct filesystem modules. Treating their data blocks) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (interchangeably is unsafe, even where they share metadata code and AmigaDOS namespace) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (concepts. Any defragmentation or repair algorithm must preserve mode-specific allocation) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (and file-header relationships.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (Our published .so and optional .ko are implementation products. Kernel AFFS documentation) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (and Amiga developer references remain the authorities on actual DOS1/3/5 variants, not the) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (appearance of a generic PDF diagram.) Tj ET
+%%Page
+0.05 0.13 0.22 rg 0 749 595 93 re f
+0.04 0.54 0.60 rg 50 747 115 4 re f
+0.78 0.82 0.86 RG 0.6 w 50 50 m 545 50 l S
+BT /F2 9 Tf 0.62 0.86 0.90 rg 1 0 0 1 50 801.0 Tm (INFILTRATOR / ORIGINAL FILESYSTEM HISTORY AND DESIGN) Tj ET
+BT /F2 19 Tf 1 1 1 rg 1 0 0 1 50 771.0 Tm (Amiga Fast File System - FFS) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 50 34.0 Tm (Filesystem-FFS / researched original-format reference) Tj ET
+BT /F1 8 Tf 0.34 0.40 0.44 rg 1 0 0 1 512 34.0 Tm (PAGE 08) Tj ET
+BT /F2 14 Tf 0.02 0.45 0.50 rg 1 0 0 1 50 711.0 Tm (PRIMARY SOURCE REFERENCES) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (These primary technical documents and near-contemporary references provide provenance for) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (the design history and on-disk structures. For exact field sizes or a particular format) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (revision, consult the original specifications and source code, not the conceptual cover) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (illustration.) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (1. Linux kernel: Overview of Amiga Filesystems) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 565.0 Tm (https://kernel.org/doc/html/v6.7/filesystems/affs.html) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 535.0 Tm (2. Amiga Developer filesystem evolution and long-name structures) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 505.0 Tm (https://wiki.amigaos.net/wiki/DCFS_and_LNFS_Low_Level_Data_Structures) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 475.0 Tm (3. ADFlib Amiga disk format technical reference) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 445.0 Tm (https://adflib.github.io/FAQ/adf_info.html) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 415.0 Tm (Our independent .so, optional .ko, build procedures and test evidence describe a separate) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 398.0 Tm (implementation. The source-level history in this PDF cannot itself qualify production) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 381.0 Tm (writes, boot, recovery or cross-platform compatibility.) Tj ET
