@@ -1,5 +1,7 @@
 # Filesystem-FFS
 
+
+**Source ownership and release boundary:** This repository owns only the Amiga FFS filesystem engine and its single distributable `FFS.so`. Common support code is compiled into that module where required, never published as an additional filesystem driver. CI rejects foreign format source directories, provider submodules, extra shared-object installation targets, and unexpected package payloads. The release manual is generated from `docs/FFS.pages`; the checked-in PDF and preview files are reference copies, not separate installed manuals.
 Canonical independent AmigaDOS Fast File System driver for InfiltratorOS. FFS is
 distinct from OFS (Original File System); neither driver's on-disk algorithms
 belong inside Defragmenter.
