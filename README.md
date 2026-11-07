@@ -4,6 +4,13 @@ Canonical independent AmigaDOS Fast File System driver for InfiltratorOS. FFS is
 distinct from OFS (Original File System); neither driver's on-disk algorithms
 belong inside Defragmenter.
 
+**One filesystem, one repository, one distributable shared object:** this
+repository produces only `FFS.so` for FFS. "Unified" means the FFS reader,
+writer, defragmenter and test-media interfaces share one FFS-specific binary.
+It does **not** combine FFS with OFS, exFAT or any other format. The older
+`FFS-legacy.so` is an internal regression-test artifact, never an installable
+driver.
+
 The **default `make` output is the unified `FFS.so`**, and the CMake
 `ffs-unified` target produces the same module. It exposes the original
 freestanding read-only V1 API and bounded existing-file overwrite V2 API,

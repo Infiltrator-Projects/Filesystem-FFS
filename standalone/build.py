@@ -15,15 +15,13 @@ CONFIG = json.loads((ROOT / "standalone/config.json").read_text())
 REPO, NAME, PDF, ABI = (CONFIG[k] for k in ("repository", "module", "pdf", "abi"))
 PDF = Path(PDF)
 KIND = CONFIG["build_system"]
-ENGINE = CONFIG.get("backend_revision")
 SLUG = REPO.lower()
 PACKAGE = "infiltrator-" + SLUG
 if (not re.fullmatch(r"Filesystem-[A-Za-z0-9]+", REPO) or
     not re.fullmatch(r"[A-Z0-9]+\.so", NAME) or
     not re.fullmatch(r"docs/[A-Za-z0-9]+\.pdf", PDF.as_posix()) or
     not re.fullmatch(r"infiltrator_filesystem_[a-z0-9_]+", ABI) or
-    KIND not in ("cmake", "make") or
-    (ENGINE and not re.fullmatch(r"[0-9a-f]{40}", ENGINE))):
+    KIND not in ("cmake", "make")):
     raise RuntimeError("Invalid filesystem build identity")
 
 def run(args):
@@ -44,36 +42,14 @@ def install_deps():
         run([*apt, "install", "-y", "--no-install-recommends", *packages])
 
 def prepare_release_source():
-    if not ENGINE:
-        return
-    source = ROOT / "backend-ext4"
-    if source.exists():
-        raise RuntimeError("Cannot overwrite EXT3 pinned engine directory")
-    run(["git", "clone", "-q", "https://github.com/Infiltrator-Projects/Filesystem-EXT4.git", source])
-    run(["git", "-C", source, "checkout", "-q", ENGINE])
-    revision = subprocess.check_output(["git", "-C", str(source), "rev-parse", "HEAD"],
-                                       text=True).strip()
-    if revision != ENGINE:
-        raise RuntimeError("EXT3 engine source revision mismatch")
-    (source / "SOURCE-REVISION").write_text(ENGINE + "\n")
+    """FFS is fully source-owned; no foreign filesystem checkout is permitted."""
+    return None
 
 def embedded_source_files():
-    if not ENGINE:
-        return []
-    directory = ROOT / "backend-ext4"
-    if (directory / "SOURCE-REVISION").read_text().strip() != ENGINE:
-        raise RuntimeError("Missing pinned EXT3 engine snapshot")
-    return [p.relative_to(ROOT) for p in directory.rglob("*")
-            if p.is_file() and not p.is_symlink() and
-            not {".git", "build", "dist", "__pycache__"}.intersection(p.parts)]
+    return []
 
 def source_root():
-    if not ENGINE:
-        return ROOT
-    source = ROOT / "backend-ext4"
-    if (source / "SOURCE-REVISION").read_text().strip() != ENGINE:
-        raise RuntimeError("EXT3 RUN must embed full verified engine sources")
-    return source
+    return ROOT
 
 def dependencies(module):
     symbols = subprocess.check_output(["readelf", "-d", str(module)], text=True)
@@ -130,13 +106,11 @@ def build(profile, module):
                      "-fprofile-use=" + str(pg) + " -fprofile-correction -Wno-missing-profile",
                      "test"])
         else:
-            extra = (["-DIFS_EXT_BUILD_LEGACY_MULTIFORMAT_TEST_MODULES=ON"]
-                     if ENGINE else [])
             def configure(cflags, ldflags=""):
                 run(["cmake", "-S", root, "-B", dest, "-DBUILD_TESTING=ON",
                      "-DCMAKE_BUILD_TYPE=Release", "-DCMAKE_C_FLAGS_RELEASE=" + cflags,
                      "-DCMAKE_CXX_FLAGS_RELEASE=" + cflags,
-                     "-DCMAKE_SHARED_LINKER_FLAGS=" + ldflags, *extra])
+                     "-DCMAKE_SHARED_LINKER_FLAGS=" + ldflags])
             if profile == "portable":
                 configure("-O2 -march=x86-64 -mtune=generic -DNDEBUG")
                 run(["cmake", "--build", dest, "--parallel", "2"])
