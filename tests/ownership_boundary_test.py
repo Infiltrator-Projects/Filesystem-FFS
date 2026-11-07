@@ -30,7 +30,7 @@ assert {p.name for p in filesystem_root.iterdir() if p.is_dir()} == {"ffs"}
 assert not (root / "native/providers").exists()
 # Installation builds exactly one corresponding filesystem SO. Additional
 # test executables and freestanding regression SOs must remain noninstallable.
-assert len(re.findall(r"\\binstall\\(TARGETS\\s+[^)]+\\)", cmake)) == 1
+assert len(re.findall(r"\binstall\(TARGETS\s+[^)]+\)", cmake)) == 1
 assert (root / "standalone/config.json").is_file()
 release_source = (root / "standalone/release.py").read_text()
 assert 'expected = {Path(f"System/Filesystems/{MODULE}"), Path(f"System/Resources/Documentation/{REPO}.pdf")}' in release_source
