@@ -23,7 +23,7 @@ def prepare_source():
         raise RuntimeError("Independent kernel source missing its Makefile: " + str(directory))
     for relative in SPEC.get("paths", [SPEC["directory"]]):
         candidate = ROOT / relative
-        if not candidate.is_dir() or candidate.is_symlink():
+        if candidate.is_symlink() or not (candidate.is_dir() or candidate.is_file()):
             raise RuntimeError("Missing or unsafe local kernel source: " + str(candidate))
 
 
@@ -32,11 +32,15 @@ def source_files():
     if SPEC is None:
         return []
     prepare_source()
-    return sorted({
-        f.relative_to(ROOT) for relative in SPEC.get("paths", [SPEC["directory"]])
-        for f in (ROOT / relative).rglob("*")
-        if f.is_file() and not f.is_symlink()
-    })
+    files = set()
+    for relative in SPEC.get("paths", [SPEC["directory"]]):
+        candidate = ROOT / relative
+        if candidate.is_file():
+            files.add(candidate.relative_to(ROOT))
+        else:
+            files.update(file.relative_to(ROOT) for file in candidate.rglob("*")
+                         if file.is_file() and not file.is_symlink())
+    return sorted(files)
 
 
 def target(build_directory):
