@@ -58,3 +58,10 @@ mount, directory listing, lookup and reads to the canonical V1 FFS reader,
 and bounded existing-file overwrites to V2. Its capabilities explicitly do
 not claim create, format, truncate, repair or generic defragmentation.
 Directory names are converted between native Latin-1 and Common UTF-8.
+
+## Common V2
+
+`FFS.so` exports Common V2 with the negotiated, hosted volume-inquiry
+operation backed by the existing FFS reader. It keeps its existing V1
+mount/list/read and V2 bounded overwrite capabilities, but does not claim
+unsupported formatting, general creation, recovery or kernel execution.

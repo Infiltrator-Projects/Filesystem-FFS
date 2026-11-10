@@ -4,6 +4,7 @@
  */
 #include "ffs_module.h"
 #include <infiltratr/filesystem_module.h>
+#include <infiltratr/filesystem_module_v2.h>
 #include <stdint.h>
 #include <string.h>
 static struct {
@@ -214,4 +215,36 @@ static const IfsFsModuleApiV1 api={
 __attribute__((visibility("default")))
 const IfsFsModuleApiV1 *infiltrator_filesystem_api_v1(void) {
     return &api;
+}
+
+/* V2 provides only real volume inquiry; no unsupported repair/format claim. */
+static int v2_query_volume(void *volume,IfsFsVolumeInfoV1 *info){
+    if(!live(volume)||!info||info->structure_bytes<sizeof(*info))
+        return IFS_FS_INVALID;
+    info->variant=s.variant;
+    info->block_bytes=s.v.io.block_bytes;
+    info->max_name_bytes=60u;
+    info->total_bytes=s.v.io.volume_bytes;
+    info->free_bytes=0u; /* Not reported by the read-only engine. */
+    return IFS_FS_OK;
+}
+static const IfsFsVolumeOpsV1 group_volume={
+    .header={IFS_FS_GROUP_ABI_V1,sizeof(IfsFsVolumeOpsV1),
+             IFS_FS_GROUP_VOLUME,0u,IFS_FS_VOLUME_QUERY},
+    .query=v2_query_volume
+};
+static const IfsFsGroupHeaderV2 *query_v2(
+    uint32_t id,uint32_t minimum,uint32_t maximum){
+    if(id!=IFS_FS_GROUP_VOLUME||minimum>IFS_FS_GROUP_ABI_V1||
+       maximum<IFS_FS_GROUP_ABI_V1)return NULL;
+    return &group_volume.header;
+}
+static const IfsFsModuleApiV2 module_v2={
+    IFS_FS_COMMON_ABI_V2,sizeof(IfsFsModuleApiV2),"ffs",
+    IFS_FS_PROFILE_HOSTED,IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME),
+    &api,query_v2
+};
+__attribute__((visibility("default")))
+const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void){
+    return &module_v2;
 }
