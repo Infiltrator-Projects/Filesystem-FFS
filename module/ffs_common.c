@@ -129,11 +129,13 @@ static int fill(IfsFsEntryV1 *out,const IfsFfsDropInEntry *e,
     uint8_t raw[31];uint32_t chars;
     if(!out||out->structure_bytes<sizeof(*out)||!out->name||
        !out->name_capacity)return IFS_FS_INVALID;
-    int r=utf8_to_latin1(name,n,raw,&chars);
+    int r=IFS_FS_OK;
     if(n==1u && name[0]=='/'){
         if(out->name_capacity<2u)return IFS_FS_NO_SPACE;
         out->name[0]='/';out->name[1]=0;out->name_bytes=1u;
     }else{
+        r=utf8_to_latin1(name,n,raw,&chars);
+        if(r)return r;
         r=convert_name(raw,chars,out->name,out->name_capacity,&out->name_bytes);
         if(r)return r;
     }
