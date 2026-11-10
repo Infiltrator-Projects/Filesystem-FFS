@@ -33,7 +33,7 @@ $(OUT)/ffs-primitives-test: tests/ffs_primitives_test.c $(FFS)/core/ffs_primitiv
 
 test: legacy $(OUT)/ffs-module-test $(OUT)/ffs-core-test $(OUT)/ffs-primitives-test
 	$(MAKE) all
-	cmake --build "$(OUT)/cmake-unified" --target ffs-fixture-test --parallel 2
+	cmake --build "$(OUT)/cmake-unified" --target ffs-fixture-test ffs-common-abi-test --parallel 2
 	ctest --test-dir "$(OUT)/cmake-unified" --output-on-failure
 	nm -D "$(OUT)/FFS.so" | grep -F 'infiltrator_filesystem_ffs_defrag_v1'
 	nm -D "$(OUT)/FFS.so" | grep -F 'infiltrator_filesystem_ffs_fixture_v1'
