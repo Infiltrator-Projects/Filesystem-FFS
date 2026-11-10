@@ -10,6 +10,10 @@ int main(void) {
     if(!ifs_fs_api_v2_valid(v2,"ffs")||
        v2->base_v1!=a||
        !ifs_fs_group_v2(v2,IFS_FS_GROUP_VOLUME)||
+       !(((const IfsFsVolumeOpsV1 *)ifs_fs_group_v2(
+              v2,IFS_FS_GROUP_VOLUME))->header.capabilities & IFS_FS_VOLUME_SYNC)||
+       !((const IfsFsVolumeOpsV1 *)ifs_fs_group_v2(
+              v2,IFS_FS_GROUP_VOLUME))->sync||
        (v2->runtime_profiles&IFS_FS_PROFILE_KERNEL))return 1;
     if(!ifs_fs_common_api_valid(a,"ffs")||
        !(a->capabilities&IFS_FS_CAP_READ)||

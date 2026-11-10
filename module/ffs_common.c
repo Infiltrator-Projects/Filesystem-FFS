@@ -228,10 +228,20 @@ static int v2_query_volume(void *volume,IfsFsVolumeInfoV1 *info){
     info->free_bytes=0u; /* Not reported by the read-only engine. */
     return IFS_FS_OK;
 }
+/* Flush through the actual mounted provider's host, not an external
+ * filesystem utility. Read-only mounts have no outstanding dirty buffers. */
+static int v2_sync_volume(void *volume){
+    if(!live(volume))return IFS_FS_INVALID;
+    if(s.io.flags&IFS_FS_IO_READ_ONLY)return IFS_FS_OK;
+    if(!(s.io.flags&IFS_FS_IO_EXCLUSIVE) || !s.io.write_at || !s.io.flush)
+        return IFS_FS_ACCESS;
+    return s.io.flush(s.io.context)==0 ? IFS_FS_OK : IFS_FS_IO_ERROR;
+}
 static const IfsFsVolumeOpsV1 group_volume={
     .header={IFS_FS_GROUP_ABI_V1,sizeof(IfsFsVolumeOpsV1),
-             IFS_FS_GROUP_VOLUME,0u,IFS_FS_VOLUME_QUERY},
-    .query=v2_query_volume
+             IFS_FS_GROUP_VOLUME,0u,IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC},
+    .query=v2_query_volume,
+    .sync=v2_sync_volume
 };
 static const IfsFsGroupHeaderV2 *query_v2(
     uint32_t id,uint32_t minimum,uint32_t maximum){
