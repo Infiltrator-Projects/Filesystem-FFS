@@ -50,3 +50,11 @@ mutation path. Do not apply OFS data-header logic to FFS raw data blocks.
 The published Debian package installs these three regular files. A manual native RUN compiles the shared object and Linux adapter locally, generates the PDF, and replaces all three files. It uses the running kernel headers by default. Use `--kernel-build DIRECTORY` for a prepared kernel build with `Module.symvers`. The kernel module is stored for manual use.
 
 InfiltratorOS calls `--system-package-mode` and decides which outputs need updating. Its worker builds a missing or older SO, repairs the PDF independently, and stores the matching released kernel module when available. Use `--build-only --output DIRECTORY` to build a Debian package.
+
+## Common ABI
+
+`FFS.so` exposes `infiltrator_filesystem_api_v1`. It delegates probe,
+mount, directory listing, lookup and reads to the canonical V1 FFS reader,
+and bounded existing-file overwrites to V2. Its capabilities explicitly do
+not claim create, format, truncate, repair or generic defragmentation.
+Directory names are converted between native Latin-1 and Common UTF-8.

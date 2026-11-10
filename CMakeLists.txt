@@ -18,7 +18,7 @@ set_property(DIRECTORY "${infiltratr_common_SOURCE_DIR}" PROPERTY EXCLUDE_FROM_A
 set(FFS "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs")
 set(DEF "${CMAKE_CURRENT_SOURCE_DIR}/native/defrag")
 add_library(ffs-unified SHARED
-    "${FFS}/module/ffs_module.c"
+    "${FFS}/module/ffs_module.c" module/ffs_common.c
     "${FFS}/core/ffs_core.c" "${FFS}/core/ffs_primitives.c"
     "${DEF}/affs_native.c" "${DEF}/affs_worker.c"
     native/fixtures/ffs_format.c native/fixtures/ffs_payload.c
@@ -37,6 +37,11 @@ target_link_options(ffs-unified PRIVATE -Wl,-z,defs)
 target_link_libraries(ffs-unified PRIVATE InfiltratrCommon::Common OpenSSL::Crypto)
 set_target_properties(ffs-unified PROPERTIES PREFIX "" OUTPUT_NAME "FFS" SUFFIX ".so")
 if(BUILD_TESTING)
+    add_executable(ffs-common-abi-test tests/test_ffs_common.c)
+    target_include_directories(ffs-common-abi-test PRIVATE
+        "${FFS}/module" "${CMAKE_CURRENT_SOURCE_DIR}/include")
+    target_link_libraries(ffs-common-abi-test PRIVATE ffs-unified)
+    add_test(NAME ffs-common-abi COMMAND ffs-common-abi-test)
     add_executable(ffs-fixture-test tests/test_ffs_fixture.c)
     target_include_directories(ffs-fixture-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
         "${CMAKE_CURRENT_SOURCE_DIR}/compat")
