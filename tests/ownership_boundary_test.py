@@ -10,7 +10,7 @@ cfg = json.loads((root / "standalone/config.json").read_text())
 assert cfg["repository"] == "Filesystem-FFS"
 assert cfg["module"] == "FFS.so"
 assert cfg["pdf"] == "docs/FFS.pdf"
-assert cfg["abi"] == "infiltrator_filesystem_ffs_defrag_v1"
+assert cfg["abi"] == "infiltrator_filesystem_api_v2"
 assert "backend_revision" not in cfg
 cmake = (root / "CMakeLists.txt").read_text()
 assert len(re.findall(r"\badd_library\([^\n]*\bSHARED\b", cmake)) == 1
