@@ -41,7 +41,7 @@ if(BUILD_TESTING)
     add_executable(ffs-common-abi-test tests/test_ffs_common.c)
     target_include_directories(ffs-common-abi-test PRIVATE
         "${FFS}/module" "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_link_libraries(ffs-common-abi-test PRIVATE ffs-unified)
+    target_link_libraries(ffs-common-abi-test PRIVATE ffs-unified InfiltratrCommon::Common)
     add_test(NAME ffs-common-abi COMMAND ffs-common-abi-test)
     add_executable(ffs-fixture-test tests/test_ffs_fixture.c)
     target_include_directories(ffs-fixture-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
