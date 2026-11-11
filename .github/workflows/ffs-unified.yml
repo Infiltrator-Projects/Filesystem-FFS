@@ -20,6 +20,11 @@ jobs:
         run: |
           cmake -S . -B build-unified -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build-unified --target ffs-unified --parallel 2
+          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v2'
+          if nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v1'; then
+            echo 'Retired Common V1 filesystem API present' >&2
+            exit 1
+          fi
           nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v1'
           nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v2'
           nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_ffs_defrag_v1'

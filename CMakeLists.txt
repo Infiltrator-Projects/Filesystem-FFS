@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
-project(FilesystemFFSUnified VERSION 1.0.0 LANGUAGES C)
+file(STRINGS "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" FILESYSTEM_VERSION LIMIT_COUNT 1)
+project(FilesystemFFSUnified VERSION ${FILESYSTEM_VERSION} LANGUAGES C)
 include(CTest)
 include(FetchContent)
 find_package(OpenSSL REQUIRED)
@@ -10,7 +11,7 @@ set(INFILTRATR_COMMON_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 set(INFILTRATR_COMMON_BUILD_SHARED OFF CACHE BOOL "" FORCE)
 FetchContent_Declare(infiltratr_common
     GIT_REPOSITORY https://github.com/Infiltrator-Projects/Libraries.git
-    GIT_TAG f002d99f5971e6f55aa91b5a245b8307bba6b0ee)
+    GIT_TAG 4c92c8dcd7e03afd4bab3105e143dbabd72c8adc)
 FetchContent_MakeAvailable(infiltratr_common)
 # Common is a link-time dependency; its development files must not be installed
 # by this standalone filesystem package.

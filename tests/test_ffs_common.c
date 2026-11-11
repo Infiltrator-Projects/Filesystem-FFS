@@ -1,27 +1,29 @@
-/* SPDX-License-Identifier: GPL-3.0-or-later */
-#include "ffs_module.h"
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * One strict Common filesystem V2 contract over the native FFS engine.
+ */
 #include <infiltratr/filesystem_module_v2.h>
-extern const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void);
 #include <stdio.h>
-extern const IfsFsModuleApiV1 *infiltrator_filesystem_api_v1(void);
-int main(void) {
-    const IfsFsModuleApiV1 *a=infiltrator_filesystem_api_v1();
-    const IfsFsModuleApiV2 *v2=infiltrator_filesystem_api_v2();
-    if(!ifs_fs_api_v2_valid(v2,"ffs")||
-       v2->base_v1!=a||
-       !ifs_fs_group_v2(v2,IFS_FS_GROUP_VOLUME)||
-       !(((const IfsFsVolumeOpsV1 *)ifs_fs_group_v2(
-              v2,IFS_FS_GROUP_VOLUME))->header.capabilities & IFS_FS_VOLUME_SYNC)||
-       !((const IfsFsVolumeOpsV1 *)ifs_fs_group_v2(
-              v2,IFS_FS_GROUP_VOLUME))->sync||
-       (v2->runtime_profiles&IFS_FS_PROFILE_KERNEL))return 1;
-    if(!ifs_fs_common_api_valid(a,"ffs")||
-       !(a->capabilities&IFS_FS_CAP_READ)||
-       !(a->capabilities&IFS_FS_CAP_WRITE)||
-       (a->capabilities & (IFS_FS_CAP_FORMAT|IFS_FS_CAP_CREATE|
-                          IFS_FS_CAP_RECOVER))){
-        fputs("FFS Common V1 ABI invalid\n",stderr);return 1;
+extern const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void);
+int main(void)
+{
+    const IfsFsModuleApiV2 *api=infiltrator_filesystem_api_v2();
+    const IfsFsCoreOpsV2 *core;
+    const IfsFsVolumeOpsV2 *volume;
+    if(!ifs_fs_api_v2_valid(api,"ffs"))return 1;
+    core=(const IfsFsCoreOpsV2 *)ifs_fs_group_v2(api,IFS_FS_GROUP_CORE);
+    volume=(const IfsFsVolumeOpsV2 *)ifs_fs_group_v2(api,IFS_FS_GROUP_VOLUME);
+    if(!core || !core->probe || !core->mount || !core->unmount ||
+       !core->stat || !core->directory_entry || !core->read || !core->write ||
+       core->create || core->remove || core->truncate ||
+       !volume || !volume->query || !volume->sync ||
+       volume->format || volume->repair ||
+       ifs_fs_group_v2(api,IFS_FS_GROUP_DEFRAG) ||
+       (api->runtime_profiles & IFS_FS_PROFILE_KERNEL) ||
+       api->group_mask!=(IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
+                        IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME))) {
+        fputs("FFS Common V2 capability contract invalid\n",stderr);
+        return 1;
     }
-    puts("FFS Common V1 ABI passed");
+    puts("FFS-STRICT-COMMON-V2-CONTRACT-PASS");
     return 0;
 }
