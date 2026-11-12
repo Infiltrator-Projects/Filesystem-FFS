@@ -15,9 +15,8 @@ driver.
 
 The **default `make` output is the unified `FFS.so`**, and the CMake
 `ffs-unified` target produces the same module. It exposes the original
-freestanding read-only V1 API and bounded existing-file overwrite V2 API,
-plus the separately versioned native FFS Defrag/Recover V1 and Test Media
-format/populate/verify V1 interfaces. The Linux host provides generic I/O,
+freestanding read and bounded overwrite engine, alongside Common V2
+and the dedicated relocation, recovery and Test Media fixture interfaces. The Linux host provides generic I/O,
 identity/stop controls and journal services over typed ABIs. No application
 fallback to private FFS filesystem source is permitted.
 
@@ -51,17 +50,10 @@ The published Debian package installs these three regular files. A manual native
 
 InfiltratorOS calls `--system-package-mode` and decides which outputs need updating. Its worker builds a missing or older SO, repairs the PDF independently, and stores the matching released kernel module when available. Use `--build-only --output DIRECTORY` to build a Debian package.
 
-## Common ABI
+## Common V2 filesystem ABI
 
-`FFS.so` exposes `infiltrator_filesystem_api_v1`. It delegates probe,
-mount, directory listing, lookup and reads to the canonical V1 FFS reader,
-and bounded existing-file overwrites to V2. Its capabilities explicitly do
-not claim create, format, truncate, repair or generic defragmentation.
-Directory names are converted between native Latin-1 and Common UTF-8.
-
-## Common V2
-
-`FFS.so` exports Common V2 with the negotiated, hosted volume-inquiry
-operation backed by the existing FFS reader. It keeps its existing V1
-mount/list/read and V2 bounded overwrite capabilities, but does not claim
-unsupported formatting, general creation, recovery or kernel execution.
+`FFS.so` exposes `infiltrator_filesystem_api_v2` for probe, mount, directory
+and file reads, bounded existing-file overwrite, volume query and read-only
+file extent mapping. Directory names are converted between native Latin-1
+and Common UTF-8. Creating files, formatting and transactional relocation
+and recovery require further Common V2 work.
