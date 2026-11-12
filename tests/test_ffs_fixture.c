@@ -113,7 +113,13 @@ done:
     close(disk.fd);
     return ok?0:-1;
 }
-int main(void) {
+/* Test-only fixture export for the independent Defragmenter Common V2
+ * consumer. Never export test-media writers as public filesystem runtime
+ * callbacks: a successful standalone test may retain its verified image. */
+int main(int argc, char **argv) {
+    if (argc!=1 && (argc!=3 || strcmp(argv[1],"--output") ||
+                    !argv[2] || !argv[2][0]))
+        return 2;
     char path[]="/tmp/ifs-ffs-corpus-XXXXXX";
     int fd=mkstemp(path);
     if(fd<0)return 1;
@@ -149,6 +155,12 @@ int main(void) {
     rc=0;
 done:
     if(fd>=0)close(fd);
+    if(rc==0 && argc==3 && rename(path,argv[2])==0)
+        return 0;
+    if(rc==0 && argc==3) {
+        perror("FFS test-only image export");
+        rc=1;
+    }
     unlink(path);
     return rc;
 }
