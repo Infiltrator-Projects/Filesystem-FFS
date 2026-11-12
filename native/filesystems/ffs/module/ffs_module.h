@@ -85,4 +85,9 @@ typedef struct {
                               const void *source, uint32_t length);
 } IfsFfsDropInModuleV2;
 const IfsFfsDropInModuleV2 *infiltrator_filesystem_module_v2(void);
+/* Source-internal physical mapping hook, not a new compatibility ABI.
+ * Uses the exact checksum-checked FFS file extension chain. */
+int ifs_ffs_data_block(const IfsFfsDropInVolume *,
+                       const IfsFfsDropInEntry *,
+                       uint32_t logical_block, uint32_t *physical_block);
 #endif

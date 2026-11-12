@@ -217,6 +217,25 @@ static int map_data(const IfsFfsDropInVolume *v, uint32_t file_block,
     return block_valid(v, *physical) && *physical != file_block &&
            *physical != v->root_block ? 0 : -1;
 }
+/* Source-owned, checksum-checked file data pointer mapping. Both the
+ * normal FFS read engine and strict Common V2 use the same map_data walker. */
+int ifs_ffs_data_block(const IfsFfsDropInVolume *v,
+                       const IfsFfsDropInEntry *file,
+                       uint32_t logical, uint32_t *physical)
+{
+    uint8_t metadata_block[32768];
+    uint32_t bytes;
+    if(!v || !file || !physical || !v->mounted ||
+       file->type != IFS_FFS_FILE || !v->io.block_bytes ||
+       metadata(v,file->block,metadata_block,FFS_META)!=0 ||
+       word(metadata_block,1u)!=file->block ||
+       word(metadata_block,v->io.block_bytes/4u-1u)!=FFS_FILE ||
+       word(metadata_block,v->io.block_bytes/4u-47u)!=file->size)
+        return -1;
+    bytes=v->io.block_bytes;
+    if(logical>=((uint64_t)file->size+bytes-1u)/bytes)return -1;
+    return map_data(v,file->block,logical,physical);
+}
 static int module_read(const IfsFfsDropInVolume *v,
                        const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)

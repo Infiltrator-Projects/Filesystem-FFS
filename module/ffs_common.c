@@ -281,6 +281,58 @@ static int v2_sync_volume(void *volume){
 }
 /* One direct V2 CORE/VOLUME contract. Never claim unqualified format,
  * repair, allocation mutation or DEFRAG callbacks. */
+/* Source-owned, read-only Common V2 per-file extent enumeration.
+ * A page is fully verified before exposing any returned extent; never
+ * infer an allocation from a short or corrupt file-extension chain.
+ * PLAN/EXECUTE/VERIFY/RECOVER are not qualified and stay absent. */
+static int map_file(void *volume,const char *path,uint64_t first,
+                    IfsFsExtentV2 *out,uint32_t capacity,uint32_t *written)
+{
+    IfsFfsDropInEntry file={0};
+    const char *basename=NULL;
+    uint32_t name_length=0u,physical[64];
+    uint64_t total,count;
+    int rc;
+    if(!live(volume)||!path||!out||!written||!capacity||capacity>64u)
+        return IFS_FS_INVALID;
+    *written=0u;
+    rc=path_entry(path,&file,&basename,&name_length);
+    if(rc)return rc;
+    if(file.type!=IFS_FFS_FILE || !s.v.io.block_bytes)
+        return IFS_FS_UNSUPPORTED;
+    total=((uint64_t)file.size+s.v.io.block_bytes-1u)/s.v.io.block_bytes;
+    if(first>=total)return IFS_FS_END;
+    count=total-first;
+    if(count>capacity)count=capacity;
+    for(uint64_t i=0u;i<count;++i) {
+        uint64_t offset;
+        if(ifs_ffs_data_block(&s.v,&file,(uint32_t)(first+i),
+                              &physical[i])!=0)
+            return IFS_FS_CORRUPT;
+        offset=(uint64_t)physical[i]*s.v.io.block_bytes;
+        if(offset>=s.v.io.volume_bytes ||
+           s.v.io.block_bytes>s.v.io.volume_bytes-offset)
+            return IFS_FS_CORRUPT;
+        for(uint64_t j=0u;j<i;++j)
+            if(physical[i]==physical[j])return IFS_FS_CORRUPT;
+    }
+    for(uint64_t i=0u;i<count;++i) {
+        uint64_t logical=(first+i)*s.v.io.block_bytes;
+        uint64_t remaining=file.size-logical;
+        out[i].logical_offset=logical;
+        out[i].physical_offset=(uint64_t)physical[i]*s.v.io.block_bytes;
+        out[i].length=remaining<s.v.io.block_bytes?
+                      remaining:s.v.io.block_bytes;
+        out[i].flags=0u;out[i].reserved=0u;
+    }
+    *written=(uint32_t)count;
+    return IFS_FS_OK;
+}
+static const IfsFsDefragOpsV2 defrag_map_ops={
+    .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsDefragOpsV2),
+             IFS_FS_GROUP_DEFRAG,0u,IFS_FS_DEFRAG_MAP},
+    .map=map_file
+};
 static const IfsFsCoreOpsV2 core={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsCoreOpsV2),
              IFS_FS_GROUP_CORE,0u,
@@ -302,6 +354,7 @@ static const IfsFsGroupHeaderV2 *query_group(uint32_t id,
         return NULL;
     if(id==IFS_FS_GROUP_CORE)return &core.header;
     if(id==IFS_FS_GROUP_VOLUME)return &volume_ops.header;
+    if(id==IFS_FS_GROUP_DEFRAG)return &defrag_map_ops.header;
     return NULL;
 }
 __attribute__((used,section(".ifsmeta")))
@@ -310,7 +363,8 @@ static const IfsFsModuleApiV2 api={
     IFS_FS_COMMON_ABI_V2,sizeof(IfsFsModuleApiV2),"ffs",
     IFS_FS_PROFILE_HOSTED,
     IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
-        IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME),query_group
+        IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|
+        IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG),query_group
 };
 __attribute__((visibility("default")))
 const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void)
