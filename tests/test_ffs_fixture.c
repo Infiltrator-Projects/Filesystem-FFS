@@ -40,7 +40,7 @@ static int verify_common_v2_map(const char *path)
       "/Defragmenter-TestData/fragmented-files/fragmented-00.bin";
     V2TestDisk disk={-1,16u*1024u*1024u};
     const IfsFsModuleApiV2 *api=infiltrator_filesystem_api_v2();
-    const IfsFsCoreOpsV2 *core;
+    const IfsFsCoreOpsV2 *core=NULL;
     const IfsFsDefragOpsV2 *map;
     IfsFsHostRuntimeV2 host={0};
     IfsFsVolumeInfoV2 info={0};
@@ -73,6 +73,17 @@ static int verify_common_v2_map(const char *path)
        map->plan||map->execute||map->verify||map->recover)
         goto done;
     info.structure_bytes=sizeof(info);
+    volatile size_t short_bytes=IFS_FS_HOST_V2_BASE_BYTES;
+    IfsFsHostRuntimeV2 *short_host=malloc(short_bytes);
+    if(!short_host)goto done;
+    memcpy(short_host,&host,IFS_FS_HOST_V2_BASE_BYTES);
+    short_host->structure_bytes=IFS_FS_HOST_V2_BASE_BYTES;
+    if(core->mount(short_host,&mounted,&info)!=IFS_FS_OK || !mounted ||
+       core->unmount(mounted)!=IFS_FS_OK) {
+        free(short_host); goto done;
+    }
+    free(short_host);
+    mounted=NULL;info.structure_bytes=sizeof(info);
     entry.structure_bytes=sizeof(entry);
     entry.name=name;
     entry.name_capacity=sizeof(name);

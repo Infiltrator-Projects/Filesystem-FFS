@@ -107,7 +107,13 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     if(s.mounted||s.generation==UINTPTR_MAX)return IFS_FS_BUSY;
     r=detect(h,&s.v,&variant);
     if(r)return r;
-    s.io=*h;
+    /* Preserve the caller's size-versioned V2 prefix without reading
+     * optional fields that an earlier host did not allocate. */
+    size_t host_bytes=h->structure_bytes<sizeof(s.io) ?
+        h->structure_bytes : sizeof(s.io);
+    memset(&s.io,0,sizeof(s.io));
+    memcpy(&s.io,h,host_bytes);
+    s.io.structure_bytes=(uint32_t)host_bytes;
     /* The native engine retains this callback context through unmount. */
     s.v.io.context=&s.io;
     s.variant=variant;s.mounted=1;
