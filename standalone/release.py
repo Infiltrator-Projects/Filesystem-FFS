@@ -224,7 +224,12 @@ def install(rest):
         parser.error("--build-only requires --output DIRECTORY")
     if opt.system_package_mode and opt.kernel_build:
         parser.error("--kernel-build applies to the manual installer")
-    kernel_target = None if opt.system_package_mode or kernel.SPEC is None else kernel.target(opt.kernel_build)
+    # Normal FFS installation always delivers only the V2 SO and manual.
+    # Native kernel adapter source is retained solely for explicit migration
+    # tests, never included as an automatic filesystem or BOOT fallback.
+    kernel_target = (None if opt.system_package_mode or
+                     opt.kernel_build is None or kernel.SPEC is None
+                     else kernel.target(opt.kernel_build))
     version = VERSION + ("+native1" if opt.profile == "aggressive" else "")
     with tempfile.TemporaryDirectory(prefix=SLUG + "-install-") as tmp:
         output = ((opt.output if opt.build_only else Path(tmp)) / f"{PACKAGE}_{version}_amd64.deb").resolve()

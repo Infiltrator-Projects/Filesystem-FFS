@@ -31,6 +31,7 @@ jobs:
           FS_SO="$(python3 -c 'import json; print(json.load(open("standalone/config.json"))["module"])')"
           FS_REPO="$(python3 -c 'import json; print(json.load(open("standalone/config.json"))["repository"])')"
           FS_ABI="$(python3 -c 'import json; print(json.load(open("standalone/config.json"))["abi"])')"
+          FS_PDF="$(python3 -c 'import json; print(json.load(open("standalone/config.json"))["pdf"])')"
           run_file="$(find dist -maxdepth 1 -type f -name '*.run' -print -quit)"
           bash "$run_file" --profile aggressive --system-package-mode --build-only --output "$RUNNER_TEMP/native"
           deb_file="$(find "$RUNNER_TEMP/native" -maxdepth 1 -type f -name '*.deb' -print -quit)"
@@ -50,90 +51,111 @@ jobs:
           name: native-filesystem-release
           path: dist/*
           if-no-files-found: error
-  kernel:
-    needs: qualify
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: native-filesystem-release
-          path: dist
-      - name: Prepare the pinned Linux build
-        shell: bash
-        run: |
-          set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends build-essential binutils cmake git pkg-config libssl-dev libsqlite3-dev dpkg-dev bc bison flex libelf-dev kmod
-          curl --fail --location --retry 5 https://codeload.github.com/gregkh/linux/tar.gz/f717995cb7dcd8998ab15516b8006aea09cfde0d -o "$RUNNER_TEMP/linux.tar.gz"
-          mkdir -p "$RUNNER_TEMP/linux"
-          tar -xzf "$RUNNER_TEMP/linux.tar.gz" -C "$RUNNER_TEMP/linux" --strip-components=1
-          kernel="$RUNNER_TEMP/linux"
-          make -C "$kernel" defconfig
-          "$kernel/scripts/config" --file "$kernel/.config" --enable MODULES --disable WERROR --disable DEBUG_INFO
-          make -C "$kernel" olddefconfig
-          make -C "$kernel" -j2 bzImage modules
-          test -s "$kernel/Module.symvers"
-          test "$(make -s -C "$kernel" kernelrelease)" = 6.12.107
-      - name: Compile all three files through the manual RUN
-        shell: bash
-        run: |
-          set -euo pipefail
-          bash dist/*.run --profile portable --kernel-build "$RUNNER_TEMP/linux" --build-only --output "$RUNNER_TEMP/manual"
-          python3 standalone/check-package.py "$RUNNER_TEMP"/manual/*.deb --profile portable --kernel-release 6.12.107
-          dpkg-deb -x "$RUNNER_TEMP"/manual/*.deb "$RUNNER_TEMP/manual-root"
-          dpkg-deb -x dist/*.deb "$RUNNER_TEMP/portable-root"
-          repository=$(python3 -c 'import sys; sys.path.insert(0,"standalone"); import build; print(build.REPO)')
-          identifier=$(printf '%s' "$repository" | sed 's/^Filesystem-//' | tr '[:upper:]' '[:lower:]')
-          manual=$(python3 -c 'import sys; sys.path.insert(0,"standalone"); import build; print(build.PDF.name)')
-          cmp "$RUNNER_TEMP/manual-root/System/Resources/Documentation/$repository.pdf" "$RUNNER_TEMP/portable-root/System/Resources/Documentation/$repository.pdf"
-          mkdir -p build/qualified
-          install -m 0644 "$RUNNER_TEMP/manual-root/System/Kernel/Filesystems/$identifier.ko" "build/qualified/$identifier-linux-6.12.107.ko"
-          package=$(find dist -maxdepth 1 -name '*.deb' -print -quit)
-          python3 standalone/release.py bundle-kernel "$package" "build/qualified/$identifier-linux-6.12.107.ko" "build/qualified/$(basename "$package")"
-          python3 standalone/check-package.py build/qualified/*.deb --profile portable --kernel-release 6.12.107
-      - uses: actions/upload-artifact@v4
-        with:
-          name: qualified-kernel-package
-          path: build/qualified/*
-          if-no-files-found: error
   publish:
-    needs: [qualify, kernel]
+    needs: qualify
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     permissions:
       contents: write
+      actions: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           name: native-filesystem-release
           path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: qualified-kernel-package
-          path: kernel-qualified
-      - name: Include the qualified kernel module in the release
+      - name: Enforce exactly one Common V2 filesystem SO and no kernel driver
         shell: bash
         run: |
           set -euo pipefail
-          install -m 0644 kernel-qualified/*.deb dist/
-          install -m 0644 kernel-qualified/*.ko dist/
-          python3 standalone/check-package.py dist/*.deb --profile portable --kernel-release 6.12.107
-      - name: Publish immutable qualified installers
+          test "$(find dist -maxdepth 1 -type f -name '*.deb' | wc -l)" = 1
+          test "$(find dist -maxdepth 1 -type f -name '*.run' | wc -l)" = 1
+          test "$(find dist -maxdepth 1 -type f -name '*.ko' | wc -l)" = 0
+          python3 standalone/check-package.py dist/*.deb --profile portable
+          mkdir -p "$RUNNER_TEMP/extracted"
+          dpkg-deb -x dist/*.deb "$RUNNER_TEMP/extracted"
+          test "$(find "$RUNNER_TEMP/extracted" -type f | wc -l)" = 2
+          test -s "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so"
+          test -s "$RUNNER_TEMP/extracted/System/Resources/Documentation/Filesystem-FFS.pdf"
+          test "$(find "$RUNNER_TEMP/extracted" -name '*.ko' | wc -l)" = 0
+          # Check the actual published-module candidate, not a private
+          # firmware-only build. No custom or relaxed BOOT validator.
+          boot=infiltrator-boot_0.1.69_amd64.deb
+          curl -fsSL --retry 3 \
+            "https://github.com/Infiltrator-Projects/Boot/releases/download/v0.1.69/$boot" \
+            -o "$RUNNER_TEMP/$boot"
+          printf '%s  %s\n' \
+            73429727974a902372f7d2644d00bb1f527e42b4454f9f3cafbf8ef1ad6c9a8e \
+            "$RUNNER_TEMP/$boot" | sha256sum -c -
+          dpkg-deb -x "$RUNNER_TEMP/$boot" "$RUNNER_TEMP/production-boot"
+          "$RUNNER_TEMP/production-boot/usr/lib/infiltrator-boot/validate-module" \
+            "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so"
+          nm -D --defined-only "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so" \
+            | grep -F 'infiltrator_filesystem_api_v2'
+          if nm -D --defined-only "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so" \
+              | grep -E 'infiltrator_filesystem_(module_v1|module_v2|.*_v1)'; then
+            echo 'Retired filesystem ABI leaked into FFS release package' >&2
+            exit 1
+          fi
+      - name: Require exact-head V2 regression and production BOOT OVMF success
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          base="repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100"
+          for attempt in $(seq 1 90); do
+            runs="$(gh api "$base" --jq '.workflow_runs[] | .name + ":" + (.conclusion // .status)')"
+            if printf '%s\n' "$runs" | grep -Fxq 'Independent FFS shared-object qualification:failure' ||
+               printf '%s\n' "$runs" | grep -Fxq 'Strict FFS Common V2 source and carrier qualification:failure' ||
+               printf '%s\n' "$runs" | grep -Fxq 'Qualify FFS Common V2 BOOT read-only module:failure'; then
+              echo "Exact-source hosted V2 or OVMF firmware tests failed" >&2
+              exit 1
+            fi
+            if printf '%s\n' "$runs" | grep -Fxq 'Independent FFS shared-object qualification:success' &&
+               printf '%s\n' "$runs" | grep -Fxq 'Strict FFS Common V2 source and carrier qualification:success' &&
+               printf '%s\n' "$runs" | grep -Fxq 'Qualify FFS Common V2 BOOT read-only module:success'; then
+              echo "FFS V2 HOSTED AND OVMF RELEASE GATES PASSED $GITHUB_SHA"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Exact-head firmware or hosted qualification not established" >&2
+          exit 1
+      - name: Publish and verify new immutable FFS V2-only release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
           tag="v$version"
-          test "$(find dist -maxdepth 1 -type f -name '*.deb' | wc -l)" = 1
-          test "$(find dist -maxdepth 1 -type f -name '*.run' | wc -l)" = 1
+          # Never replace an immutable tag or publish a release for a
+          # different source commit. The qualification gates above are exact.
           if gh release view "$tag" --json tagName >/dev/null 2>&1; then
-            echo "Existing immutable release $tag retained"
-            exit 0
+            tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
+            tag_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type')"
+            if [[ "$tag_type" == tag ]]; then
+              tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/tags/$tag_sha" --jq '.object.sha')"
+            fi
+            test "$tag_sha" = "$GITHUB_SHA" || {
+              echo "REFUSING: immutable release $tag is for $tag_sha" >&2
+              exit 1
+            }
+          elif gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" >/dev/null 2>&1; then
+            echo "REFUSING: tag $tag exists without a verified release" >&2
+            exit 1
           fi
-          gh release create "$tag" dist/*.deb dist/*.run dist/*.ko --target "$GITHUB_SHA" \
-            --title "Independent filesystem native and portable installers $version" \
-            --notes "Portable DEB contains the shared object, generated manual and Linux 6.12.107 adapter. The source-embedded RUN compiles the shared object and Linux adapter locally, generates the manual and installs all three regular files. InfiltratorOS checks and repairs its outputs independently."
+          (cd dist && sha256sum -- *.deb *.run > SHA256SUMS.txt && sha256sum -c SHA256SUMS.txt)
+          if ! gh release view "$tag" --json tagName >/dev/null 2>&1; then
+            gh release create "$tag" dist/*.deb dist/*.run dist/SHA256SUMS.txt \
+              --target "$GITHUB_SHA" \
+              --title "Common V2-only FFS filesystem $version" \
+              --notes "Verified Common V2 hosted and freestanding filesystem reader, real BOOT validator and disposable OVMF kernel/initramfs handoff. One FFS.so provides the canonical engine in both profiles. Includes Debian package and CPU-native source RUN. No filesystem-specific Linux kernel driver is delivered."
+          fi
+          remote="$RUNNER_TEMP/FFS-release-check"
+          mkdir -p "$remote"
+          gh release download "$tag" --dir "$remote"
+          diff -qr dist "$remote"
+          (cd "$remote" && sha256sum -c SHA256SUMS.txt)
+          echo "FFS_COMMON_V2_IMMUTABLE_RELEASE_PASS $tag $GITHUB_SHA"
