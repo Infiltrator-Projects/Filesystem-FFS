@@ -40,7 +40,7 @@ cp "$images/native.initrd" "$images/current.initrd"
 # Build a genuine DOS1 FFS volume with Amiga native directory hashes,
 # allocation bitmap, checksummed metadata and the exact Linux EFI payloads.
 # The test-only generator never participates in BOOT or production FFS.so.
-"$work/ffs-boot-fixture" "$media" "$kernel" "$images/native.initrd"
+"$(dirname "$work")/ffs-boot-fixture" "$media" "$kernel" "$images/native.initrd"
 if [[ $mode == bad-superblock ]]; then
     # Deliberately invalidate DOS1 magic on disposable media.
     printf '\000' | dd of="$media" bs=1 seek=3 conv=notrunc status=none
