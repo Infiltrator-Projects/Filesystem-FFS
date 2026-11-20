@@ -22,5 +22,7 @@ jobs:
           cmake --build build-unified --target ffs-unified --parallel 2
           nm -D --defined-only build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v2'
           sh tests/check_production_v2.sh build-unified/FFS.so
-          cmake --build build-unified --target ffs-fixture-test ffs-common-abi-test --parallel 2
+          # All CTest executables must exist; only building the two historical
+          # targets would falsely fail the new actual-source native regressions.
+          cmake --build build-unified --parallel 2
           ctest --test-dir build-unified --output-on-failure
