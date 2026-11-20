@@ -12,7 +12,7 @@ jobs:
     timeout-minutes: 18
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Install independent UEFI and Minix media tooling
+      - name: Install independent UEFI and native FFS test tooling
         run: |
           set -euo pipefail
           sudo apt-get update
@@ -48,7 +48,28 @@ jobs:
           DESTDIR="$work/stage" cmake --install "$work/build"
           cmp "$work/stage/System/Filesystems/FFS.so" "$work/build/FFS.so"
           "$validator" "$work/stage/System/Filesystems/FFS.so"
-      - name: Prove real kernel and initramfs from clean Minix V3 and corrupt rejection
+      - name: Verify actual FFS DOS1 media by Common V2 before firmware boot
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/ffs-firmware"
+          cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror \
+            tests/ffs_boot_fixture.c \
+            native/filesystems/ffs/core/ffs_primitives.c \
+            -o "$work/ffs-boot-fixture"
+          cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror \
+            -I"$work/build/_deps/infiltratr_common-src/include" \
+            tests/ffs_boot_v2_test.c -ldl -o "$work/ffs-boot-v2-test"
+          # Cross 32 KiB allocation boundaries using nontrivial real bytes.
+          dd if=/dev/urandom bs=1M count=2 of="$work/sample-kernel" status=none
+          dd if=/dev/urandom bs=256K count=1 of="$work/sample-initrd" status=none
+          "$work/ffs-boot-fixture" "$work/sample.img" \
+            "$work/sample-kernel" "$work/sample-initrd"
+          (cd "$work" && sha256sum sample.img > sample.before.sha256)
+          "$work/ffs-boot-v2-test" \
+            "$work/stage/System/Filesystems/FFS.so" \
+            "$work/sample.img" "$work/sample-kernel" "$work/sample-initrd"
+          (cd "$work" && sha256sum -c sample.before.sha256)
+      - name: Prove real EFI-stub kernel and initramfs from FFS in OVMF
         run: |
           set -euo pipefail
           work="$RUNNER_TEMP/ffs-firmware"
@@ -56,10 +77,6 @@ jobs:
           test -n "$image"
           (cd "$work" && apt-get download "linux-image-unsigned-${image#linux-image-}")
           dpkg-deb -x "$work"/linux-image-unsigned-*.deb "$work/kernel"
-          cc -std=c11 -O2 -Wall -Wextra -Werror \
-            tests/ffs_boot_fixture.c \
-            native/filesystems/ffs/core/ffs_primitives.c \
-            -o "$work/ffs-boot-fixture"
           kernel="$work/kernel/boot/vmlinuz-${image#linux-image-}"
           test -s "$kernel"
           boot="$work/boot/usr/lib/infiltrator-boot/EFI/BOOT/BOOTX64.EFI"
