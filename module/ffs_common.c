@@ -13,6 +13,10 @@ static struct {
     uint32_t variant;
     int mounted;
 } s;
+/* The native FFS reader returns 0/-1. Preserve the precise Common V2
+ * host failure instead of treating an unavailable sector as missing files,
+ * corrupt metadata or a different filesystem. One active session per SO. */
+static int last_read_error=IFS_FS_OK;
 static int live(void *v){
     return s.mounted && s.handle && (uintptr_t)v==s.handle && s.v.mounted;
 }
@@ -23,7 +27,9 @@ static int host_ok(const IfsFsHostRuntimeV2 *h)
 static int v2_read(void *ctx,uint64_t offset,void *dst,uint32_t bytes)
 {
     const IfsFsHostRuntimeV2 *h=ctx;
-    return ifs_fs_host_read_bytes_v2(h,offset,dst,bytes)==IFS_FS_OK?0:-1;
+    const int rc=ifs_fs_host_read_bytes_v2(h,offset,dst,bytes);
+    if(rc!=IFS_FS_OK)last_read_error=rc;
+    return rc==IFS_FS_OK?0:-1;
 }
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
 /* The independent FFS writer preflights allocation before copying allocated
@@ -80,15 +86,22 @@ static int detect(const IfsFsHostRuntimeV2 *h,IfsFfsDropInVolume *found,
     uint8_t boot[4];
     int valid=0;
     const IfsFfsDropInModule *m=ifs_ffs_native_read_ops();
-    if(v2_read((void *)h,0,boot,sizeof(boot))||
-        boot[0]!='D'||boot[1]!='O'||boot[2]!='S'||
+    last_read_error=IFS_FS_OK;
+    if(v2_read((void *)h,0,boot,sizeof(boot)))
+        return last_read_error!=IFS_FS_OK?
+            last_read_error:IFS_FS_IO_ERROR;
+    if(boot[0]!='D'||boot[1]!='O'||boot[2]!='S'||
         (boot[3]!=1u&&boot[3]!=3u&&boot[3]!=5u))
         return IFS_FS_NOT_FOUND;
     for(uint32_t size=512u;size<=32768u;size*=2u){
         IfsFfsDropInVolume v={0};
         IfsFfsDropInIo io={v2_read,(void *)h,h->volume_bytes,size};
-        if(h->volume_bytes%size ||
-           m->mount(&v,&io)!=0)continue;
+        if(h->volume_bytes%size)continue;
+        last_read_error=IFS_FS_OK;
+        if(m->mount(&v,&io)!=0) {
+            if(last_read_error!=IFS_FS_OK)return last_read_error;
+            continue;
+        }
         if(++valid>1)return IFS_FS_CORRUPT;
         *found=v;
     }
@@ -165,7 +178,8 @@ static int path_entry(const char *path,IfsFfsDropInEntry *out,
         if(r)return r;
         IfsFfsDropInEntry next={0};
         r=m->lookup(&s.v,&current,latin,n,&next);
-        if(r)return r==1?IFS_FS_NOT_FOUND:IFS_FS_CORRUPT;
+        if(r)return r==1?IFS_FS_NOT_FOUND:
+            last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
         current=next;*basename=start;*name_len=(uint32_t)(p-start);
         if(*p=='/'&&!*++p)return IFS_FS_INVALID;
     }
@@ -210,6 +224,7 @@ static int fill(IfsFsEntryV2 *out,const IfsFfsDropInEntry *e,
 static int stat_path(void *volume,const char *path,IfsFsEntryV2 *out){
     IfsFfsDropInEntry e={0};const char *name=NULL;uint32_t n=0;
     if(!live(volume))return IFS_FS_INVALID;
+    last_read_error=IFS_FS_OK;
     int r=path_entry(path,&e,&name,&n);
     return r?r:fill(out,&e,name,n);
 }
@@ -218,12 +233,14 @@ static int nth(void *volume,const char *dir,uint32_t index,IfsFsEntryV2 *out){
     const char *name;uint32_t n;uint8_t raw[31];uint32_t length=0;
     IfsFfsDropInDirCursor cursor={0};
     if(!live(volume))return IFS_FS_INVALID;
+    last_read_error=IFS_FS_OK;
     int r=path_entry(dir,&parent,&name,&n);
     if(r)return r;
     const IfsFfsDropInModule *m=ifs_ffs_native_read_ops();
     for(uint32_t i=0;i<=index;++i) {
         r=m->next(&s.v,&parent,&cursor,&e,raw);
-        if(r)return r==1?IFS_FS_END:IFS_FS_CORRUPT;
+        if(r)return r==1?IFS_FS_END:
+            last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
         if(i==UINT32_MAX)return IFS_FS_INVALID;
     }
     while(length<31u && raw[length])++length;
@@ -242,12 +259,14 @@ static int read_file(void *volume,const char *path,uint64_t offset,
     IfsFfsDropInEntry e={0};const char *name;uint32_t n;
     if(!live(volume)||(!dest&&len))return IFS_FS_INVALID;
     if(offset>UINT32_MAX||len>UINT32_MAX-offset)return IFS_FS_UNSUPPORTED;
+    last_read_error=IFS_FS_OK;
     int r=path_entry(path,&e,&name,&n);
     if(r)return r;
     if(e.type!=IFS_FFS_FILE)return IFS_FS_INVALID;
     return ifs_ffs_native_read_ops()->read(&s.v,&e,(uint32_t)offset,
                                                      dest,len)==0?
-        IFS_FS_OK:IFS_FS_IO_ERROR;
+        IFS_FS_OK:(last_read_error!=IFS_FS_OK?
+                  last_read_error:IFS_FS_CORRUPT);
 }
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
 static int write_file(void *volume,const char *path,uint64_t offset,
@@ -308,6 +327,7 @@ static int map_file(void *volume,const char *path,uint64_t first,
     if(!live(volume)||!path||!out||!written||!capacity||capacity>64u)
         return IFS_FS_INVALID;
     *written=0u;
+    last_read_error=IFS_FS_OK;
     rc=path_entry(path,&file,&basename,&name_length);
     if(rc)return rc;
     if(file.type!=IFS_FFS_FILE || !s.v.io.block_bytes)
@@ -320,7 +340,8 @@ static int map_file(void *volume,const char *path,uint64_t first,
         uint64_t offset;
         if(ifs_ffs_data_block(&s.v,&file,(uint32_t)(first+i),
                               &physical[i])!=0)
-            return IFS_FS_CORRUPT;
+            return last_read_error!=IFS_FS_OK?
+                last_read_error:IFS_FS_CORRUPT;
         offset=(uint64_t)physical[i]*s.v.io.block_bytes;
         if(offset>=s.v.io.volume_bytes ||
            s.v.io.block_bytes>s.v.io.volume_bytes-offset)
