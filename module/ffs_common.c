@@ -25,6 +25,7 @@ static int v2_read(void *ctx,uint64_t offset,void *dst,uint32_t bytes)
     const IfsFsHostRuntimeV2 *h=ctx;
     return ifs_fs_host_read_bytes_v2(h,offset,dst,bytes)==IFS_FS_OK?0:-1;
 }
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
 /* The independent FFS writer preflights allocation before copying allocated
  * file bytes. Only full aligned V2 host sectors may be written. Reconstruct
  * partial sectors without changing neighbouring data. No crash rollback is
@@ -72,11 +73,13 @@ static int v2_flush(void *ctx)
     const IfsFsHostRuntimeV2 *h=ctx;
     return host_ok(h) && h->flush && h->flush(h->context)==0 ? 0 : -1;
 }
+#endif /* !IFS_FFS_FIRMWARE_BUILD */
+
 static int detect(const IfsFsHostRuntimeV2 *h,IfsFfsDropInVolume *found,
                   uint32_t *variant){
     uint8_t boot[4];
     int valid=0;
-    const IfsFfsDropInModule *m=infiltrator_filesystem_module_v1();
+    const IfsFfsDropInModule *m=ifs_ffs_native_read_ops();
     if(v2_read((void *)h,0,boot,sizeof(boot))||
         boot[0]!='D'||boot[1]!='O'||boot[2]!='S'||
         (boot[3]!=1u&&boot[3]!=3u&&boot[3]!=5u))
@@ -149,7 +152,7 @@ static int utf8_to_latin1(const char *src,uint32_t length,
 }
 static int path_entry(const char *path,IfsFfsDropInEntry *out,
                       const char **basename,uint32_t *name_len){
-    const IfsFfsDropInModule *m=infiltrator_filesystem_module_v1();
+    const IfsFfsDropInModule *m=ifs_ffs_native_read_ops();
     IfsFfsDropInEntry current=m->root(&s.v);
     if(!path||path[0]!='/')return IFS_FS_INVALID;
     const char *p=path+1;
@@ -217,7 +220,7 @@ static int nth(void *volume,const char *dir,uint32_t index,IfsFsEntryV2 *out){
     if(!live(volume))return IFS_FS_INVALID;
     int r=path_entry(dir,&parent,&name,&n);
     if(r)return r;
-    const IfsFfsDropInModule *m=infiltrator_filesystem_module_v1();
+    const IfsFfsDropInModule *m=ifs_ffs_native_read_ops();
     for(uint32_t i=0;i<=index;++i) {
         r=m->next(&s.v,&parent,&cursor,&e,raw);
         if(r)return r==1?IFS_FS_END:IFS_FS_CORRUPT;
@@ -242,10 +245,11 @@ static int read_file(void *volume,const char *path,uint64_t offset,
     int r=path_entry(path,&e,&name,&n);
     if(r)return r;
     if(e.type!=IFS_FFS_FILE)return IFS_FS_INVALID;
-    return infiltrator_filesystem_module_v1()->read(&s.v,&e,(uint32_t)offset,
+    return ifs_ffs_native_read_ops()->read(&s.v,&e,(uint32_t)offset,
                                                      dest,len)==0?
         IFS_FS_OK:IFS_FS_IO_ERROR;
 }
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
 static int write_file(void *volume,const char *path,uint64_t offset,
                       const void *data,uint32_t len){
     IfsFfsDropInEntry e={0};const char *name;uint32_t n;
@@ -261,10 +265,12 @@ static int write_file(void *volume,const char *path,uint64_t offset,
     if(offset>e.size||len>e.size-offset)return IFS_FS_UNSUPPORTED;
     IfsFfsWritableIo io={0};
     io.read=s.v.io;io.write_at=v2_write;io.flush=v2_flush;
-    r=infiltrator_filesystem_module_v2()->overwrite_existing(&s.v,&e,&io,
+    r=ifs_ffs_native_write_ops()->overwrite_existing(&s.v,&e,&io,
         (uint32_t)offset,data,len);
     return r==0?IFS_FS_OK:IFS_FS_IO_ERROR;
 }
+#endif /* !IFS_FFS_FIRMWARE_BUILD */
+
 /* V2 provides only real volume inquiry; no unsupported repair/format claim. */
 static int v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info){
     if(!live(volume)||!info||info->structure_bytes<sizeof(*info))
@@ -343,9 +349,16 @@ static const IfsFsCoreOpsV2 core={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsCoreOpsV2),
              IFS_FS_GROUP_CORE,0u,
              IFS_FS_CORE_PROBE|IFS_FS_CORE_MOUNT|IFS_FS_CORE_STAT|
+             #if defined(IFS_FFS_FIRMWARE_BUILD)
+             IFS_FS_CORE_LIST|IFS_FS_CORE_READ},
+#else
              IFS_FS_CORE_LIST|IFS_FS_CORE_READ|IFS_FS_CORE_WRITE},
+#endif
     .probe=probe,.mount=mount,.unmount=unmount,
-    .stat=stat_path,.directory_entry=nth,.read=read_file,.write=write_file
+    .stat=stat_path,.directory_entry=nth,.read=read_file
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+    ,.write=write_file
+#endif
 };
 static const IfsFsVolumeOpsV2 volume_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsVolumeOpsV2),
@@ -367,7 +380,11 @@ __attribute__((used,section(".ifsmeta")))
 static const char identity[]="IFS-MODULE:ffs:common2";
 static const IfsFsModuleApiV2 api={
     IFS_FS_COMMON_ABI_V2,sizeof(IfsFsModuleApiV2),"ffs",
+#if defined(IFS_FFS_FIRMWARE_BUILD)
+    IFS_FS_PROFILE_FREESTANDING|IFS_FS_PROFILE_FIRMWARE,
+#else
     IFS_FS_PROFILE_HOSTED,
+#endif
     IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
         IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|
         IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG),query_group
