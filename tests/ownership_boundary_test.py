@@ -13,7 +13,14 @@ assert cfg["pdf"] == "docs/FFS.pdf"
 assert cfg["abi"] == "infiltrator_filesystem_api_v2"
 assert "backend_revision" not in cfg
 cmake = (root / "CMakeLists.txt").read_text()
-assert len(re.findall(r"\badd_library\([^\n]*\bSHARED\b", cmake)) == 1
+# Exactly one installed production provider; historical analyser sources
+# belong only to a noninstalled BUILD_TESTING target.
+assert 'add_library(ffs-unified SHARED' in cmake
+assert 'add_library(ffs-legacy-test-support SHARED' in cmake
+assert cmake.index('if(BUILD_TESTING)') < cmake.index('add_library(ffs-legacy-test-support SHARED')
+assert 'install(TARGETS ffs-legacy-test-support' not in cmake
+assert 'module/v2-only.map' in cmake
+assert '.infiltrator_boot' in cmake
 assert 'OUTPUT_NAME "FFS"' in cmake
 assert "install(TARGETS ffs-unified LIBRARY DESTINATION /System/Filesystems)" in cmake
 assert not (root / "native/filesystems/ofs").exists()

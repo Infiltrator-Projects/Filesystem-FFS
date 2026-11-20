@@ -1,6 +1,6 @@
-name: Native FFS.so migration qualification
+name: Strict FFS Common V2 source and carrier qualification
 on:
-  pull_request:
+  push:
     branches: [main]
   workflow_dispatch:
 permissions:
@@ -14,20 +14,13 @@ jobs:
         run: python3 tests/ownership_boundary_test.py
       - name: Install native prerequisites
         run: sudo apt-get update && sudo apt-get install -y cmake build-essential libssl-dev
-      - name: Verify legacy freestanding reader remains intact
+      - name: Verify native FFS reader and all historical regressions without shipping V1
         run: make test
-      - name: Build candidate unified FFS.so without separate filesystem worker
+      - name: Build only Common V2 FFS.so with verified embedded firmware ELF
         run: |
           cmake -S . -B build-unified -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
           cmake --build build-unified --target ffs-unified --parallel 2
-          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v2'
-          if nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v1'; then
-            echo 'Retired Common V1 filesystem API present' >&2
-            exit 1
-          fi
-          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v1'
-          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_module_v2'
-          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_ffs_defrag_v1'
-          nm -D build-unified/FFS.so | grep -F 'infiltrator_filesystem_ffs_fixture_v1'
+          nm -D --defined-only build-unified/FFS.so | grep -F 'infiltrator_filesystem_api_v2'
+          sh tests/check_production_v2.sh build-unified/FFS.so
           cmake --build build-unified --target ffs-fixture-test ffs-common-abi-test --parallel 2
           ctest --test-dir build-unified --output-on-failure

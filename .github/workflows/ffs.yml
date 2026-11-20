@@ -13,7 +13,7 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
       - name: Enforce FFS-only source and shared-object ownership
         run: python3 tests/ownership_boundary_test.py
-      - name: Build FFS.so V1/V2 and run original independent DOS1/3/5 core/media tests
+      - name: Build the single Common V2 FFS.so; keep DOS1/3/5 native regressions
         run: make test
 
       - name: Verify exactly one PDF per runtime SO
