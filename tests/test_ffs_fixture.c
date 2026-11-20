@@ -24,10 +24,11 @@ static void bits_set(uint8_t *p,uint64_t bit,bool value) {
  * by the independent FFS formatter. No Defragmenter disk parser is used. */
 extern const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void);
 typedef struct {int fd;uint64_t length;} V2TestDisk;
+static uint64_t fail_read_at=UINT64_MAX;
 static int v2_test_read(void *ctx,uint64_t offset,void *dst,uint32_t bytes)
 {
     const V2TestDisk *d=ctx;
-    if(!d||!dst||offset%512u||bytes%512u||!bytes||
+    if(!d||!dst||offset==fail_read_at||offset%512u||bytes%512u||!bytes||
        offset>d->length||bytes>d->length-offset)
         return -1;
     return pread(d->fd,dst,bytes,(off_t)offset)==(ssize_t)bytes?0:-1;
@@ -72,6 +73,10 @@ static int verify_common_v2_map(const char *path)
        map->header.capabilities!=IFS_FS_DEFRAG_MAP||
        map->plan||map->execute||map->verify||map->recover)
         goto done;
+    /* Real disk transfer faults must propagate through Common V2. */
+    fail_read_at=0u;
+    if(core->probe(&host,&variant)!=IFS_FS_IO_ERROR)goto done;
+    fail_read_at=UINT64_MAX;
     info.structure_bytes=sizeof(info);
     volatile size_t short_bytes=IFS_FS_HOST_V2_BASE_BYTES;
     IfsFsHostRuntimeV2 *short_host=malloc(short_bytes);
@@ -97,6 +102,13 @@ static int verify_common_v2_map(const char *path)
         const int rc=map->map(mounted,file,first,ext,16u,&count);
         if(rc==IFS_FS_END){if(count==0u&&total_bytes==entry.size_bytes)ok=1;break;}
         if(rc!=IFS_FS_OK||!count||count>16u)break;
+        if(page==0u){
+            uint8_t byte=0;
+            fail_read_at=ext[0].physical_offset;
+            if(core->read(mounted,file,0u,&byte,1u)!=IFS_FS_IO_ERROR)
+                goto done;
+            fail_read_at=UINT64_MAX;
+        }
         for(uint32_t i=0u;i<count;++i){
             uint64_t logical=(first+i)*info.block_bytes;
             uint8_t physical=0u,logical_byte=0u;
