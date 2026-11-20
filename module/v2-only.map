@@ -1,0 +1,9 @@
+/* SPDX-License-Identifier: GPL-3.0-or-later
+ * The Common V2 descriptor is the only public filesystem API.
+ * Private native reader/writer and historical workers cannot be loaded
+ * as independent runtime interfaces.
+ */
+{
+ global: infiltrator_filesystem_api_v2;
+ local: *;
+};
