@@ -73,7 +73,9 @@ static void init_directory(uint32_t id,uint32_t parent,const char *name)
  * Preserve an existing collision through the exact on-disk next pointer. */
 static void insert(uint32_t parent,uint32_t child)
 {
-    uint8_t *dir=blocks[parent],*entry=blocks[child];
+    /* ROOT lives at the volume midpoint. In this test builder's bounded
+     * metadata table it is slot zero, not array index 2048. */
+    uint8_t *dir=blocks[parent==ROOT?0u:parent],*entry=blocks[child];
     uint32_t len=entry[BS-80];
     uint32_t hash=ifs_ffs_directory_hash(entry+BS-79,len,HASH,0);
     uint32_t head=get(dir,6u+hash);
