@@ -2,7 +2,7 @@
 #ifndef INFILTRATOR_FFS_DROPIN_MODULE_H
 #define INFILTRATOR_FFS_DROPIN_MODULE_H
 #include <stdint.h>
-#define IFS_FFS_DROPIN_ABI_VERSION 1u
+#define IFS_FFS_NATIVE_TABLE_VERSION 1u
 #define IFS_FFS_CAP_PROBE UINT64_C(1)
 #define IFS_FFS_CAP_LOOKUP UINT64_C(2)
 #define IFS_FFS_CAP_ENUMERATE UINT64_C(4)
@@ -55,14 +55,15 @@ typedef struct {
     int (*read)(const IfsFfsDropInVolume *, const IfsFfsDropInEntry *,
                 uint32_t position, void *buffer, uint32_t length);
 } IfsFfsDropInModule;
-const IfsFfsDropInModule *infiltrator_filesystem_module_v1(void);
+/* Private on-media reader. Public operations use Common V2 only. */
+const IfsFfsDropInModule *ifs_ffs_native_read_ops(void);
 
-/* Optional, separately discoverable V2. Existing V1 layout is immutable.
+/* Source-owned existing-data writer, not a second filesystem ABI.
  * Overwrite allocated bytes of an existing regular file only. The host must
  * own an exclusive unmounted volume lease, supply flush, and accept that an
  * I/O failure may leave partial data; NO allocation or recovery is provided.
  */
-#define IFS_FFS_DROPIN_V2_ABI_VERSION 2u
+#define IFS_FFS_NATIVE_WRITER_VERSION 2u
 #define IFS_FFS_V2_CAP_OVERWRITE_EXISTING UINT64_C(256)
 typedef int (*IfsFfsWriteAt)(void *context, uint64_t offset,
                              const void *source, uint32_t bytes);
@@ -77,14 +78,14 @@ typedef struct {
     uint32_t structure_bytes;
     const char *format_id;
     uint64_t capabilities;
-    const IfsFfsDropInModule *readonly_v1;
+    const IfsFfsDropInModule *readonly_engine;
     int (*overwrite_existing)(const IfsFfsDropInVolume *,
                               const IfsFfsDropInEntry *,
                               const IfsFfsWritableIo *,
                               uint32_t position,
                               const void *source, uint32_t length);
 } IfsFfsDropInModuleV2;
-const IfsFfsDropInModuleV2 *infiltrator_filesystem_module_v2(void);
+const IfsFfsDropInModuleV2 *ifs_ffs_native_write_ops(void);
 /* Source-internal physical mapping hook, not a new compatibility ABI.
  * Uses the exact checksum-checked FFS file extension chain. */
 int ifs_ffs_data_block(const IfsFfsDropInVolume *,

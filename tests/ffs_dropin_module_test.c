@@ -74,8 +74,8 @@ static int fail(const char *why)
 { fprintf(stderr,"FFS module test: %s\n",why);free(disk);return 1; }
 int main(void)
 {
-    const IfsFfsDropInModule *api=infiltrator_filesystem_module_v1();
-    const IfsFfsDropInModuleV2 *v2=infiltrator_filesystem_module_v2();
+    const IfsFfsDropInModule *api=ifs_ffs_native_read_ops();
+    const IfsFfsDropInModuleV2 *v2=ifs_ffs_native_write_ops();
     IfsFfsDropInIo io={read_at,NULL,0u,0u};
     IfsFfsWritableIo writable={ {read_at,NULL,0u,0u},
                                 write_at, flush_media };
@@ -83,10 +83,10 @@ int main(void)
     IfsFfsDropInEntry rt,dir,file,out;
     IfsFfsDropInDirCursor cursor;
     uint8_t text[8],name[31];
-    if(!v2 || v2->abi_version!=IFS_FFS_DROPIN_V2_ABI_VERSION ||
+    if(!v2 || v2->abi_version!=IFS_FFS_NATIVE_WRITER_VERSION ||
        v2->structure_bytes!=sizeof(*v2) ||
        strcmp(v2->format_id,"ffs")!=0 ||
-       v2->readonly_v1!=api ||
+       v2->readonly_engine!=api ||
        !(v2->capabilities&IFS_FFS_V2_CAP_OVERWRITE_EXISTING))
        return fail("invalid optional FFS V2 ABI");
     if(!api || api->abi_version!=1u ||

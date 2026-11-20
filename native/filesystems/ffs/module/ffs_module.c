@@ -268,18 +268,15 @@ static int module_read(const IfsFfsDropInVolume *v,
     }
     return 0;
 }
-__attribute__((used,section(".ifsmeta")))
-static const char format_identity[] = "IFS-MODULE:ffs:1";
 static const IfsFfsDropInModule module = {
-    IFS_FFS_DROPIN_ABI_VERSION, sizeof(IfsFfsDropInModule),
+    IFS_FFS_NATIVE_TABLE_VERSION, sizeof(IfsFfsDropInModule),
     "ffs", "Amiga Fast File System",
     IFS_FFS_CAP_PROBE | IFS_FFS_CAP_LOOKUP | IFS_FFS_CAP_ENUMERATE |
     IFS_FFS_CAP_FILE_READ | IFS_FFS_CAP_DOS1 | IFS_FFS_CAP_DOS3 |
     IFS_FFS_CAP_DOS5 | IFS_FFS_CAP_BLOCK_512_TO_32768,
     mount_volume, module_root, module_lookup, module_next, module_read
 };
-__attribute__((visibility("default")))
-const IfsFfsDropInModule *infiltrator_filesystem_module_v1(void)
+const IfsFfsDropInModule *ifs_ffs_native_read_ops(void)
 {
     return &module;
 }
@@ -352,14 +349,11 @@ static int overwrite_existing(const IfsFfsDropInVolume *volume,
     return io->flush(io->read.context) == 0 ? 0 : -1;
 }
 
-__attribute__((used, section(".ifsmeta")))
-static const char format_identity_v2[] = "IFS-MODULE:ffs:2";
 static const IfsFfsDropInModuleV2 module_v2 = {
-    IFS_FFS_DROPIN_V2_ABI_VERSION, sizeof(IfsFfsDropInModuleV2),
+    IFS_FFS_NATIVE_WRITER_VERSION, sizeof(IfsFfsDropInModuleV2),
     "ffs", IFS_FFS_V2_CAP_OVERWRITE_EXISTING, &module, overwrite_existing
 };
-__attribute__((visibility("default")))
-const IfsFfsDropInModuleV2 *infiltrator_filesystem_module_v2(void)
+const IfsFfsDropInModuleV2 *ifs_ffs_native_write_ops(void)
 {
     return &module_v2;
 }
