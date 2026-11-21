@@ -189,17 +189,22 @@ static int path_entry(const char *path,IfsFfsDropInEntry *out,
 }
 static int convert_name(const uint8_t *latin,uint32_t n,char *out,uint32_t cap,
                         uint32_t *written){
-    uint32_t k=0;
+    uint32_t required=0u,k=0u;
+    if(!latin || !out || !written)return IFS_FS_INVALID;
+    /* Validate the complete UTF-8 size, including the terminator,
+     * before touching the caller-owned buffer. A capacity failure must
+     * never expose a partially converted directory name. */
+    for(uint32_t i=0;i<n;++i)
+        required+=latin[i]<128u?1u:2u;
+    if(required>=cap)return IFS_FS_NO_SPACE;
     for(uint32_t i=0;i<n;++i){
-        unsigned char c=latin[i];
-        if(c<128u){if(k+1u>=cap)return IFS_FS_NO_SPACE;out[k++]=(char)c;}
+        const unsigned char c=latin[i];
+        if(c<128u)out[k++]=(char)c;
         else {
-            if(k+2u>=cap)return IFS_FS_NO_SPACE;
             out[k++]=(char)(0xc0u|(c>>6));
             out[k++]=(char)(0x80u|(c&0x3fu));
         }
     }
-    if(k>=cap)return IFS_FS_NO_SPACE;
     out[k]=0;*written=k;
     return IFS_FS_OK;
 }
