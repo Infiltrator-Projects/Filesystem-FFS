@@ -116,10 +116,14 @@ int main(int argc,char **argv)
     REQUIRE(d.size==(uint64_t)BS*BLOCKS);
     IfsFsHostRuntimeV2 host=host_for(&d);
     REQUIRE(ifs_fs_host_v2_valid(&host));
-    uint32_t version=0;
+    uint32_t version=UINT32_MAX;
     d.fail_at=0;
-    REQUIRE(core->probe(&host,&version)==IFS_FS_IO_ERROR);
+    REQUIRE(core->probe(&host,&version)==IFS_FS_IO_ERROR && version==0u);
     d.fail_at=UINT64_MAX;
+    IfsFsHostRuntimeV2 invalid_host=host;
+    invalid_host.abi_version=1u;
+    version=UINT32_MAX;
+    REQUIRE(core->probe(&invalid_host,&version)==IFS_FS_INVALID && version==0u);
     REQUIRE(core->probe(&host,&version)==IFS_FS_OK && version==1u);
     IfsFsVolumeInfoV2 info={0};info.structure_bytes=sizeof(info);
     void *volume=NULL;
