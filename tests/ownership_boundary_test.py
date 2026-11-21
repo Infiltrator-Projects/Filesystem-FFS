@@ -13,16 +13,13 @@ assert cfg["pdf"] == "docs/FFS.pdf"
 assert cfg["abi"] == "infiltrator_filesystem_api_v2"
 assert "backend_revision" not in cfg
 cmake = (root / "CMakeLists.txt").read_text()
-# Exactly one installed production provider; historical analyser sources
-# belong only to a noninstalled BUILD_TESTING target.
+# Exactly one production provider, no historical filesystem test DSO.
 assert 'add_library(ffs-unified SHARED' in cmake
-assert 'add_library(ffs-legacy-test-support SHARED' in cmake
-assert cmake.index('if(BUILD_TESTING)') < cmake.index('add_library(ffs-legacy-test-support SHARED')
-assert 'install(TARGETS ffs-legacy-test-support' not in cmake
+assert 'add_library(ffs-legacy-test-support SHARED' not in cmake
 assert 'module/v2-only.map' in cmake
 assert '.infiltrator_boot' in cmake
 assert 'OUTPUT_NAME "FFS"' in cmake
-assert "install(TARGETS ffs-unified LIBRARY DESTINATION /System/Filesystems)" in cmake
+assert 'install(TARGETS ffs-unified LIBRARY DESTINATION /System/Filesystems)' in cmake
 assert not (root / "native/filesystems/ofs").exists()
 assert not (root / "native/filesystems/exfat").exists()
 assert not (root / "native/filesystems/fat").exists()
@@ -30,8 +27,6 @@ builder = (root / "standalone/build.py").read_text()
 assert "backend-ext4" not in builder
 assert "Filesystem-EXT4" not in builder
 assert "backend_revision" not in builder
-# Every repository owns exactly one format implementation directory; shared
-# portable support may live elsewhere, but foreign format trees may not return.
 filesystem_root = root / "native/filesystems"
 assert {p.name for p in filesystem_root.iterdir() if p.is_dir()} == {"ffs"}
 assert not (root / "native/providers").exists()

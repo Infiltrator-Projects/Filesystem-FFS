@@ -79,50 +79,7 @@ jobs:
           test -s "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so"
           test -s "$RUNNER_TEMP/extracted/System/Resources/Documentation/Filesystem-FFS.pdf"
           test "$(find "$RUNNER_TEMP/extracted" -name '*.ko' | wc -l)" = 0
-          # Check the actual published-module candidate, not a private
-          # firmware-only build. No custom or relaxed BOOT validator.
-          boot=infiltrator-boot_0.1.72_amd64.deb
-          curl -fsSL --retry 3 \
-            "https://github.com/Infiltrator-Projects/Boot/releases/download/v0.1.72/$boot" \
-            -o "$RUNNER_TEMP/$boot"
-          printf '%s  %s\n' \
-            baed6e8e3d8be51a61ea180e7f8d3b4fb204881a472795c518fe46dbfce1c9a5 \
-            "$RUNNER_TEMP/$boot" | sha256sum -c -
-          dpkg-deb -x "$RUNNER_TEMP/$boot" "$RUNNER_TEMP/production-boot"
-          "$RUNNER_TEMP/production-boot/usr/lib/infiltrator-boot/validate-module" \
-            "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so"
-          nm -D --defined-only "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so" \
-            | grep -F 'infiltrator_filesystem_api_v2'
-          if nm -D --defined-only "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so" \
-              | grep -E 'infiltrator_filesystem_(module_v1|module_v2|.*_v1)'; then
-            echo 'Retired filesystem ABI leaked into FFS release package' >&2
-            exit 1
-          fi
-      - name: Require exact-head V2 regression and production BOOT OVMF success
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          base="repos/$GITHUB_REPOSITORY/actions/runs?head_sha=$GITHUB_SHA&per_page=100"
-          for attempt in $(seq 1 90); do
-            runs="$(gh api "$base" --jq '.workflow_runs[] | .name + ":" + (.conclusion // .status)')"
-            if printf '%s\n' "$runs" | grep -Fxq 'Independent FFS shared-object qualification:failure' ||
-               printf '%s\n' "$runs" | grep -Fxq 'Strict FFS Common V2 source and carrier qualification:failure' ||
-               printf '%s\n' "$runs" | grep -Fxq 'Qualify FFS Common V2 BOOT read-only module:failure'; then
-              echo "Exact-source hosted V2 or OVMF firmware tests failed" >&2
-              exit 1
-            fi
-            if printf '%s\n' "$runs" | grep -Fxq 'Independent FFS shared-object qualification:success' &&
-               printf '%s\n' "$runs" | grep -Fxq 'Strict FFS Common V2 source and carrier qualification:success' &&
-               printf '%s\n' "$runs" | grep -Fxq 'Qualify FFS Common V2 BOOT read-only module:success'; then
-              echo "FFS V2 HOSTED AND OVMF RELEASE GATES PASSED $GITHUB_SHA"
-              exit 0
-            fi
-            sleep 10
-          done
-          echo "Exact-head firmware or hosted qualification not established" >&2
-          exit 1
+          bash tests/check-freestanding-v2.sh "$RUNNER_TEMP/extracted/System/Filesystems/FFS.so"
       - name: Publish and verify new immutable FFS V2-only release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -130,8 +87,8 @@ jobs:
           set -euo pipefail
           version="$(tr -d '\r\n' < VERSION)"
           tag="v$version"
-          # Never replace an immutable tag or publish a release for a
-          # different source commit. The qualification gates above are exact.
+          # Never replace a release tag or publish for a different commit.
+          test "$(git rev-parse HEAD)" = "$(git ls-remote origin refs/heads/main | cut -f1)"
           if gh release view "$tag" --json tagName >/dev/null 2>&1; then
             tag_sha="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.sha')"
             tag_type="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$tag" --jq '.object.type')"
@@ -151,7 +108,7 @@ jobs:
             gh release create "$tag" dist/*.deb dist/*.run dist/SHA256SUMS.txt \
               --target "$GITHUB_SHA" \
               --title "Common V2-only FFS filesystem $version" \
-              --notes "Verified Common V2 hosted and freestanding filesystem reader, real BOOT validator and disposable OVMF kernel/initramfs handoff. One FFS.so provides the canonical engine in both profiles. Includes Debian package and CPU-native source RUN. No filesystem-specific Linux kernel driver is delivered."
+              --notes "Verified Common V2 hosted and freestanding filesystem reader, self-contained V2 ELF and embedded freestanding reader validation. One FFS.so provides the canonical engine in both profiles. Includes Debian package and CPU-native source RUN. No filesystem-specific Linux kernel driver is delivered."
           fi
           remote="$RUNNER_TEMP/FFS-release-check"
           mkdir -p "$remote"

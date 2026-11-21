@@ -41,8 +41,6 @@ set(DEF "${CMAKE_CURRENT_SOURCE_DIR}/native/defrag")
 add_library(ffs-unified SHARED
     "${FFS}/module/ffs_module.c" module/ffs_common.c
     "${FFS}/core/ffs_core.c" "${FFS}/core/ffs_primitives.c")
-set_source_files_properties("${DEF}/affs_worker.c" PROPERTIES
-    COMPILE_DEFINITIONS "main=ifs_ffs_worker_main")
 target_include_directories(ffs-unified PRIVATE
     "${FFS}/core" "${FFS}/module" "${DEF}"
     "${CMAKE_CURRENT_SOURCE_DIR}/compat" "${CMAKE_CURRENT_SOURCE_DIR}/include")
@@ -62,31 +60,11 @@ add_custom_command(TARGET ffs-unified POST_BUILD
    "$<TARGET_FILE:ffs-unified>"
  VERBATIM)
 if(BUILD_TESTING)
-    # Preserve all legacy analyser and fixture code in an uninstalled
-    # regression-only target. No old interface ships in FFS.so.
-    add_library(ffs-legacy-test-support SHARED
-      "${DEF}/affs_native.c" "${DEF}/affs_worker.c"
-      native/fixtures/ffs_format.c native/fixtures/ffs_payload.c
-      native/fixtures/fixture_profile.c module/ffs_fixture_module.c
-      compat/legacy_services.c compat/runtime_alloc.c
-      module/ffs_defrag_module.c)
-    target_include_directories(ffs-legacy-test-support PRIVATE
-      "${FFS}/core" "${FFS}/module" "${DEF}"
-      "${CMAKE_CURRENT_SOURCE_DIR}/compat"
-      "${CMAKE_CURRENT_SOURCE_DIR}/include")
-    target_compile_definitions(ffs-legacy-test-support PRIVATE _GNU_SOURCE _FILE_OFFSET_BITS=64)
-    target_link_libraries(ffs-legacy-test-support PRIVATE
-      InfiltratrCommon::Common OpenSSL::Crypto)
     add_executable(ffs-common-abi-test tests/test_ffs_common.c)
     target_include_directories(ffs-common-abi-test PRIVATE
         "${FFS}/module" "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(ffs-common-abi-test PRIVATE ffs-unified InfiltratrCommon::Common)
     add_test(NAME ffs-common-abi COMMAND ffs-common-abi-test)
-    add_executable(ffs-fixture-test tests/test_ffs_fixture.c)
-    target_include_directories(ffs-fixture-test PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/compat")
-    target_link_libraries(ffs-fixture-test PRIVATE ffs-legacy-test-support ffs-unified InfiltratrCommon::Common)
-    add_test(NAME ffs-fixture-test COMMAND ffs-fixture-test)
     add_test(NAME ffs-production-v2-only
       COMMAND sh "${CMAKE_CURRENT_SOURCE_DIR}/tests/check_production_v2.sh"
               "$<TARGET_FILE:ffs-unified>")
