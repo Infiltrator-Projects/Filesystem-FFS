@@ -111,7 +111,9 @@ static int detect(const IfsFsHostRuntimeV2 *h,IfsFfsDropInVolume *found,
 }
 static int probe(const IfsFsHostRuntimeV2 *h,uint32_t *variant){
     IfsFfsDropInVolume v={0};
-    if(!host_ok(h)||!variant)return IFS_FS_INVALID;
+    if(!variant)return IFS_FS_INVALID;
+    *variant=0u;
+    if(!host_ok(h))return IFS_FS_INVALID;
     return detect(h,&v,variant);
 }
 static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
