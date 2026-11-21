@@ -97,7 +97,7 @@ static int contains_entry(const IfsFsCoreOpsV2 *core,void *volume,
 }
 int main(int argc,char **argv)
 {
-    REQUIRE(argc==5);
+    REQUIRE(argc==6);
     void *handle=dlopen(argv[1],RTLD_NOW|RTLD_LOCAL);
     REQUIRE(handle!=NULL);
     void *sym=dlsym(handle,IFS_FS_COMMON_EXPORT_V2);
@@ -147,6 +147,20 @@ int main(int argc,char **argv)
     d.fail_at=UINT64_MAX;
     REQUIRE(core->unmount(volume)==IFS_FS_OK);
     REQUIRE(d.calls>0u && fclose(d.file)==0);
+
+    /* Independently corrupted disposable media must never be accepted. */
+    Disk damaged={0};
+    REQUIRE(open_media(&damaged,argv[5])==0);
+    IfsFsHostRuntimeV2 damaged_host=host_for(&damaged);
+    uint32_t damaged_variant=UINT32_MAX;
+    REQUIRE(core->probe(&damaged_host,&damaged_variant)==IFS_FS_CORRUPT &&
+            damaged_variant==0u);
+    void *unexpected=NULL;
+    IfsFsVolumeInfoV2 damaged_info={0};
+    damaged_info.structure_bytes=sizeof(damaged_info);
+    REQUIRE(core->mount(&damaged_host,&unexpected,&damaged_info)!=IFS_FS_OK &&
+            unexpected==NULL);
+    REQUIRE(fclose(damaged.file)==0);
     REQUIRE(dlclose(handle)==0);
     puts("FFS_COMMON_V2_REAL_IMAGE_NAMESPACE_AND_KERNEL_BYTES_PASS");
     return 0;
