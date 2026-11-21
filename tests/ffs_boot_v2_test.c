@@ -134,6 +134,19 @@ int main(int argc,char **argv)
     REQUIRE(contains_entry(core,volume,"/System","Kernel")==1);
     REQUIRE(contains_entry(core,volume,"/System/Kernel","Images")==1);
     REQUIRE(contains_entry(core,volume,"/System/Kernel/Images","current.initrd")==1);
+    /* An insufficient UTF-8 name capacity must not leave a partial
+     * result in the caller-owned V2 buffer, for either STAT or LIST. */
+    {
+        char narrow[2]={'X','X'};
+        IfsFsEntryV2 entry={0};
+        entry.structure_bytes=sizeof(entry);
+        entry.name=narrow;
+        entry.name_capacity=sizeof(narrow);
+        REQUIRE(core->stat(volume,"/vmlinuz",&entry)==IFS_FS_NO_SPACE);
+        REQUIRE(narrow[0]=='X' && narrow[1]=='X' && entry.name_bytes==0u);
+        REQUIRE(core->directory_entry(volume,"/",0u,&entry)==IFS_FS_NO_SPACE);
+        REQUIRE(narrow[0]=='X' && narrow[1]=='X' && entry.name_bytes==0u);
+    }
     REQUIRE(compare_content(core,volume,"/vmlinuz",argv[3])==0);
     REQUIRE(compare_content(core,volume,"/System/Kernel/Images/current.initrd",argv[4])==0);
     char path_name[128]={0};
