@@ -44,6 +44,13 @@ jobs:
           dd if=/dev/urandom of="$build/initramfs" bs=256K count=1 status=none
           "$build/create" "$build/media.img" "$build/kernel.bin" "$build/initramfs"
           (cd "$build" && sha256sum media.img > original.sha256)
+          cp "$build/media.img" "$build/corrupt.img"
+          # Damage the root block checksum byte on the separate copy.
+          checksum_byte=$((2048 * 32768 + 20))
+          original_byte=$(od -An -tu1 -N1 -j "$checksum_byte" "$build/corrupt.img")
+          printf '%b' "\\$(printf '%03o' "$((original_byte ^ 1))")" |
+            dd of="$build/corrupt.img" bs=1 seek="$checksum_byte" conv=notrunc status=none
           "$build/verify" "$RUNNER_TEMP/stage/System/Filesystems/FFS.so" \
-             "$build/media.img" "$build/kernel.bin" "$build/initramfs"
+             "$build/media.img" "$build/kernel.bin" "$build/initramfs" \
+             "$build/corrupt.img"
           (cd "$build" && sha256sum -c original.sha256)
