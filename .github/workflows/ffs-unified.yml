@@ -12,9 +12,9 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
       - name: Assert this repository owns only FFS.so
         run: python3 tests/ownership_boundary_test.py
-      - name: Install native prerequisites
-        run: sudo apt-get update && sudo apt-get install -y cmake build-essential libssl-dev
-      - name: Verify native FFS reader and all historical regressions without shipping V1
+      - name: Verify preinstalled build prerequisites
+        run: cmake --version && cc --version && test -f /usr/include/openssl/sha.h
+      - name: Verify native FFS reader and Common V2 regression suite
         run: make test
       - name: Build only Common V2 FFS.so with verified embedded firmware ELF
         run: |

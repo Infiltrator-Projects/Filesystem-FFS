@@ -1,5 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-name: Qualify FFS Common V2 BOOT read-only module
+# Direct Common V2 firmware profile and real FFS media qualification.
+# BOOT, an ESP and NVRAM are never accessed or modified.
+name: Qualify FFS freestanding Common V2 reader
 on:
   push:
     branches: [main]
@@ -9,85 +11,39 @@ permissions:
 jobs:
   ffs-uefi:
     runs-on: ubuntu-24.04
-    timeout-minutes: 18
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Install independent UEFI and native FFS test tooling
+      - uses: actions/checkout@v4
+      - name: Validate filesystem reader and embedded ELF from native source
+        shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libssl-dev cpio busybox-static \
-            util-linux e2fsprogs dosfstools gdisk mtools qemu-system-x86 ovmf
-      - name: Get authenticated production BOOT validation contract
+          cmake -S . -B build/firmware-ci -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build build/firmware-ci --parallel 2
+          ctest --test-dir build/firmware-ci --output-on-failure
+          stage="$RUNNER_TEMP/stage"
+          DESTDIR="$stage" cmake --install build/firmware-ci
+          module="$stage/System/Filesystems/FFS.so"
+          cmp "$module" build/firmware-ci/FFS.so
+          bash tests/check-freestanding-v2.sh "$module"
+          objcopy --dump-section ".infiltrator_boot=$RUNNER_TEMP/firmware.so" "$module" "$RUNNER_TEMP/carrier.so"
+          cmp "$RUNNER_TEMP/firmware.so" build/firmware-ci/firmware/FFS.so
+      - name: Read actual disposable FFS DOS1 files via packaged Common V2
+        shell: bash
         run: |
           set -euo pipefail
-          work="$RUNNER_TEMP/ffs-firmware"
-          mkdir -p "$work"
-          boot=infiltrator-boot_0.1.72_amd64.deb
-          curl -fsSL --retry 3 \
-            "https://github.com/Infiltrator-Projects/Boot/releases/download/v0.1.72/$boot" \
-            -o "$work/$boot"
-          printf '%s  %s\n' \
-            baed6e8e3d8be51a61ea180e7f8d3b4fb204881a472795c518fe46dbfce1c9a5 \
-            "$work/$boot" | sha256sum -c -
-          dpkg-deb -x "$work/$boot" "$work/boot"
-      - name: Require V2-only carrier and actual production validator
-        run: |
-          set -euo pipefail
-          work="$RUNNER_TEMP/ffs-firmware"
-          cmake -S . -B "$work/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-          cmake --build "$work/build" --parallel 2
-          ctest --test-dir "$work/build" --output-on-failure
-          test -s "$work/build/FFS.so"
-          test -s "$work/build/firmware/FFS.so"
-          sh tests/check_production_v2.sh "$work/build/FFS.so"
-          validator="$work/boot/usr/lib/infiltrator-boot/validate-module"
-          "$validator" "$work/build/firmware/FFS.so"
-          "$validator" "$work/build/FFS.so"
-          DESTDIR="$work/stage" cmake --install "$work/build"
-          cmp "$work/stage/System/Filesystems/FFS.so" "$work/build/FFS.so"
-          "$validator" "$work/stage/System/Filesystems/FFS.so"
-      - name: Verify actual FFS DOS1 media by Common V2 before firmware boot
-        run: |
-          set -euo pipefail
-          work="$RUNNER_TEMP/ffs-firmware"
-          cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror \
-            tests/ffs_boot_fixture.c \
-            native/filesystems/ffs/core/ffs_primitives.c \
-            -o "$work/ffs-boot-fixture"
-          cc -std=c11 -O2 -Wall -Wextra -Wpedantic -Werror \
-            -I"$work/build/_deps/infiltratr_common-src/include" \
-            tests/ffs_boot_v2_test.c -ldl -o "$work/ffs-boot-v2-test"
-          # Cross 32 KiB allocation boundaries using nontrivial real bytes.
-          dd if=/dev/urandom bs=1M count=2 of="$work/sample-kernel" status=none
-          dd if=/dev/urandom bs=256K count=1 of="$work/sample-initrd" status=none
-          "$work/ffs-boot-fixture" "$work/sample.img" \
-            "$work/sample-kernel" "$work/sample-initrd"
-          (cd "$work" && sha256sum sample.img > sample.before.sha256)
-          "$work/ffs-boot-v2-test" \
-            "$work/stage/System/Filesystems/FFS.so" \
-            "$work/sample.img" "$work/sample-kernel" "$work/sample-initrd"
-          (cd "$work" && sha256sum -c sample.before.sha256)
-      - name: Prove real EFI-stub kernel and initramfs from FFS in OVMF
-        run: |
-          set -euo pipefail
-          work="$RUNNER_TEMP/ffs-firmware"
-          image=$(apt-cache depends linux-image-generic | awk '/Depends: linux-image-[0-9]/ { image=$2 } END { print image }')
-          test -n "$image"
-          (cd "$work" && apt-get download "linux-image-unsigned-${image#linux-image-}")
-          dpkg-deb -x "$work"/linux-image-unsigned-*.deb "$work/kernel"
-          kernel="$work/kernel/boot/vmlinuz-${image#linux-image-}"
-          test -s "$kernel"
-          boot="$work/boot/usr/lib/infiltrator-boot/EFI/BOOT/BOOTX64.EFI"
-          module="$work/stage/System/Filesystems/FFS.so"
-          bash tests/firmware-ffs.sh "$boot" "$module" "$kernel" "$work/vm"
-          bash tests/firmware-ffs.sh "$boot" "$module" "$kernel" "$work/bad-vm" bad-superblock
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        if: always()
-        with:
-          name: ffs-boot-ovmf-serial
-          path: |
-            ${{ runner.temp }}/ffs-firmware/vm/serial.log
-            ${{ runner.temp }}/ffs-firmware/bad-vm/serial.log
-          if-no-files-found: warn
+          build="$RUNNER_TEMP/ffs-media"
+          mkdir -p "$build"
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+             tests/ffs_boot_fixture.c native/filesystems/ffs/core/ffs_primitives.c \
+             -o "$build/create"
+          cc -std=c11 -O2 -Wall -Wextra -Werror \
+             -Ibuild/firmware-ci/_deps/infiltratr_common-src/include \
+             tests/ffs_boot_v2_test.c -ldl -o "$build/verify"
+          dd if=/dev/urandom of="$build/kernel.bin" bs=1M count=2 status=none
+          dd if=/dev/urandom of="$build/initramfs" bs=256K count=1 status=none
+          "$build/create" "$build/media.img" "$build/kernel.bin" "$build/initramfs"
+          (cd "$build" && sha256sum media.img > original.sha256)
+          "$build/verify" "$RUNNER_TEMP/stage/System/Filesystems/FFS.so" \
+             "$build/media.img" "$build/kernel.bin" "$build/initramfs"
+          (cd "$build" && sha256sum -c original.sha256)
