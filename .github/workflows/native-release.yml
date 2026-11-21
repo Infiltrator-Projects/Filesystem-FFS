@@ -46,6 +46,20 @@ jobs:
           test -s "$RUNNER_TEMP/installed/System/Filesystems/$FS_SO"
           test -s "$RUNNER_TEMP/installed/System/Resources/Documentation/$FS_REPO.pdf"
           readelf -Ws "$RUNNER_TEMP/installed/System/Filesystems/$FS_SO" | grep -F "$FS_ABI"
+      - name: Read genuine extended FFS files from both packaged modules
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends busybox-static cpio
+          oracle=$(python3 tests/fetch-oracle.py --output "$RUNNER_TEMP/ffs-oracle")
+          bash tests/boot-file-fixtures.sh "$RUNNER_TEMP/ffs-files"
+          cmake -S . -B media-test -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
+          cmake --build media-test --target ffs-extension-media
+          dpkg-deb -x dist/*.deb "$RUNNER_TEMP/portable"
+          for profile in portable installed; do
+            bash tests/extension-media.sh "$RUNNER_TEMP/$profile/System/Filesystems/FFS.so" \
+                "$oracle" "$RUNNER_TEMP/ffs-files" media-test/ffs-extension-media
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: native-filesystem-release

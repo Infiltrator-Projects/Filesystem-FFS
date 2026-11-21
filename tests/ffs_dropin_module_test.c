@@ -65,7 +65,7 @@ static void fixture(uint32_t block_bytes,uint32_t dostype,uint32_t data_blocks)
     checksum(HEADER);
     if(data_blocks>slots){
         put(EXT,0u,16u);put(EXT,1u,EXT);
-        put(EXT,2u,data_blocks-slots);put(EXT,4u,DATA+slots);
+        put(EXT,2u,data_blocks-slots); /* T_LIST first-data hint is normally zero. */
         put(EXT,bytes/4u-3u,HEADER);put(EXT,bytes/4u-1u,(uint32_t)-3);
         checksum(EXT);
     }

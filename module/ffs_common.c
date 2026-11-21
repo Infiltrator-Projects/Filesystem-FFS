@@ -269,7 +269,7 @@ static int read_file(void *volume,const char *path,uint64_t offset,
     last_read_error=IFS_FS_OK;
     int r=path_entry(path,&e,&name,&n);
     if(r)return r;
-    if(e.type!=IFS_FFS_FILE)return IFS_FS_INVALID;
+    if(e.type!=IFS_FFS_FILE || offset>e.size || len>e.size-offset)return IFS_FS_INVALID;
     return ifs_ffs_native_read_ops()->read(&s.v,&e,(uint32_t)offset,
                                                      dest,len)==0?
         IFS_FS_OK:(last_read_error!=IFS_FS_OK?

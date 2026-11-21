@@ -60,6 +60,10 @@ add_custom_command(TARGET ffs-unified POST_BUILD
    "$<TARGET_FILE:ffs-unified>"
  VERBATIM)
 if(BUILD_TESTING)
+  add_executable(ffs-extension-media tests/ffs_extension_media.c)
+  target_include_directories(ffs-extension-media PRIVATE "${infiltratr_common_SOURCE_DIR}/include")
+  target_compile_options(ffs-extension-media PRIVATE -Wall -Wextra -Werror)
+  target_link_libraries(ffs-extension-media PRIVATE ${CMAKE_DL_LIBS})
     add_executable(ffs-common-abi-test tests/test_ffs_common.c)
     target_include_directories(ffs-common-abi-test PRIVATE
         "${FFS}/module" "${CMAKE_CURRENT_SOURCE_DIR}/include")

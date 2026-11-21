@@ -189,82 +189,92 @@ static int module_next(const IfsFfsDropInVolume *v,
     }
     return 1;
 }
-static int map_data(const IfsFfsDropInVolume *v, uint32_t file_block,
-                    uint32_t logical, uint32_t *physical)
+/* A header and its T_LIST continuation blocks store data pointers in reverse
+ * word order. The count and the file's byte length together bound the chain.
+ * The legacy first-data hint is meaningful in the header. Real FFS list
+ * blocks leave it zero, while some producers repeat the first entry there. */
+typedef struct {
+    uint8_t raw[32768];
+    uint32_t page, index, pages, data_blocks, anchor, power, distance;
+} PointerPage;
+
+static int load_page(const IfsFfsDropInVolume *v, uint32_t file, PointerPage *p)
 {
-    uint8_t bytes[32768];
-    uint32_t extension = file_block, per = v->hash_size;
-    uint32_t ext_index = logical / per, at = logical % per;
-    if (!physical || !block_valid(v, file_block) || ext_index >= v->blocks)
+    const uint32_t words = v->io.block_bytes / 4;
+    uint32_t count = p->data_blocks - p->index * v->hash_size;
+    if (count > v->hash_size) count = v->hash_size;
+    if (metadata(v, p->page, p->raw, p->index ? FFS_LIST : FFS_META) ||
+        word(p->raw, 1) != p->page || word(p->raw, 2) != count ||
+        word(p->raw, words - 1) != FFS_FILE ||
+        (p->index && word(p->raw, words - 3) != file)) return -1;
+    const uint32_t hint = word(p->raw, 4);
+    if (hint && (!count || hint != word(p->raw, 5 + v->hash_size))) return -1;
+    const uint32_t next = word(p->raw, words - 2);
+    if (p->index + 1 == p->pages) return next ? -1 : 0;
+    return block_valid(v, next) && next != p->page && next != file && next != v->root_block ? 0 : -1;
+}
+
+static int first_page(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file, PointerPage *p)
+{
+    if (!v || !v->mounted || !v->hash_size || !file || file->type != IFS_FFS_FILE)
         return -1;
-    for (uint32_t i = 0u; i <= ext_index; ++i) {
-        if (metadata(v, extension, bytes, i == 0u ? FFS_META : FFS_LIST) != 0 ||
-            word(bytes, 1u) != extension ||
-            word(bytes, v->io.block_bytes / 4u - 1u) != FFS_FILE ||
-            word(bytes, 2u) > per ||
-            (i > 0u && word(bytes, v->io.block_bytes / 4u - 3u) != file_block) ||
-            (word(bytes, 2u) == 0u && word(bytes, 4u) != 0u) ||
-            (word(bytes, 2u) && word(bytes, 4u) !=
-             word(bytes, 6u + per - 1u))) return -1;
-        if (i != ext_index) {
-            extension = word(bytes, v->io.block_bytes / 4u - 2u);
-            if (!block_valid(v, extension) || extension == file_block)
-                return -1;
+    p->page = p->anchor = file->block;
+    p->index = p->distance = 0;
+    p->power = 1;
+    p->data_blocks = (uint32_t)(((uint64_t)file->size + v->io.block_bytes - 1) / v->io.block_bytes);
+    p->pages = p->data_blocks ? 1 + (p->data_blocks - 1) / v->hash_size : 1;
+    if (p->data_blocks >= v->blocks || load_page(v, file->block, p)) return -1;
+    return word(p->raw, v->io.block_bytes / 4 - 47) == file->size ? 0 : -1;
+}
+
+static int data_pointer(const IfsFfsDropInVolume *v, uint32_t file, PointerPage *p,
+                        uint32_t logical, uint32_t *physical)
+{
+    if (logical >= p->data_blocks) return -1;
+    const uint32_t wanted = logical / v->hash_size;
+    while (p->index < wanted) {
+        uint32_t next = word(p->raw, v->io.block_bytes / 4 - 2);
+        /* Brent's cycle check uses constant memory on the firmware stack. */
+        if (next == p->anchor) return -1;
+        if (++p->distance == p->power) {
+            p->anchor = next;
+            p->distance = 0;
+            if (p->power <= UINT32_MAX / 2) p->power *= 2;
         }
+        p->page = next;
+        ++p->index;
+        if (load_page(v, file, p)) return -1;
     }
-    if (at >= word(bytes, 2u)) return -1;
-    *physical = word(bytes, 6u + per - 1u - at);
-    return block_valid(v, *physical) && *physical != file_block &&
+    *physical = word(p->raw, 5 + v->hash_size - logical % v->hash_size);
+    return block_valid(v, *physical) && *physical != file && *physical != p->page &&
            *physical != v->root_block ? 0 : -1;
 }
-/* Source-owned, checksum-checked file data pointer mapping. Both the
- * normal FFS read engine and strict Common V2 use the same map_data walker. */
-int ifs_ffs_data_block(const IfsFfsDropInVolume *v,
-                       const IfsFfsDropInEntry *file,
+
+int ifs_ffs_data_block(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t logical, uint32_t *physical)
 {
-    uint8_t metadata_block[32768];
-    uint32_t bytes;
-    if(!v || !file || !physical || !v->mounted ||
-       file->type != IFS_FFS_FILE || !v->io.block_bytes ||
-       metadata(v,file->block,metadata_block,FFS_META)!=0 ||
-       word(metadata_block,1u)!=file->block ||
-       word(metadata_block,v->io.block_bytes/4u-1u)!=FFS_FILE ||
-       word(metadata_block,v->io.block_bytes/4u-47u)!=file->size)
-        return -1;
-    bytes=v->io.block_bytes;
-    if(logical>=((uint64_t)file->size+bytes-1u)/bytes)return -1;
-    return map_data(v,file->block,logical,physical);
+    PointerPage p;
+    if (!physical || first_page(v, file, &p)) return -1;
+    return data_pointer(v, file->block, &p, logical, physical);
 }
-static int module_read(const IfsFfsDropInVolume *v,
-                       const IfsFfsDropInEntry *file,
+
+static int module_read(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)
 {
-    uint8_t header[32768];
-    uint8_t *dest = (uint8_t *)output;
-    uint32_t size, block, skip, within;
-    if (!v || !v->mounted || !file || file->type != IFS_FFS_FILE ||
-        (!output && length) ||
-        metadata(v, file->block, header, FFS_META) != 0 ||
-        word(header, 1u) != file->block ||
-        word(header, v->io.block_bytes / 4u - 1u) != FFS_FILE)
-        return -1;
-    size = word(header, v->io.block_bytes / 4u - 47u);
-    if (size != file->size || position > size || length > size - position)
-        return -1;
-    skip = position / v->io.block_bytes;
-    within = position % v->io.block_bytes;
+    PointerPage p;
+    if ((!output && length) || first_page(v, file, &p) ||
+        position > file->size || length > file->size - position) return -1;
+    uint8_t *dest = output;
     while (length) {
-        uint32_t count = v->io.block_bytes - within;
+        const uint32_t within = position % v->io.block_bytes;
+        uint32_t count = v->io.block_bytes - within, block;
         if (count > length) count = length;
-        if (map_data(v, file->block, skip, &block) != 0 ||
-            v->io.read_at(v->io.context,
-                (uint64_t)block * v->io.block_bytes + within,
-                dest, count) != 0) return -1;
+        if (data_pointer(v, file->block, &p, position / v->io.block_bytes, &block) ||
+            v->io.read_at(v->io.context, (uint64_t)block * v->io.block_bytes + within,
+                          dest, count)) return -1;
         dest += count;
+        position += count;
         length -= count;
-        within = 0u;
-        ++skip;
     }
     return 0;
 }
@@ -320,7 +330,7 @@ static int overwrite_existing(const IfsFfsDropInVolume *volume,
         const uint32_t within = offset_in_file % live.io.block_bytes;
         uint32_t count = live.io.block_bytes - within;
         if (count > remaining) count = remaining;
-        if (map_data(&live, file->block,
+        if (ifs_ffs_data_block(&live, file,
                      offset_in_file / live.io.block_bytes, &block) != 0)
             return -1;
         offset_in_file += count;
@@ -334,7 +344,7 @@ static int overwrite_existing(const IfsFfsDropInVolume *volume,
         uint32_t count = live.io.block_bytes - within;
         uint64_t physical_offset;
         if (count > remaining) count = remaining;
-        if (map_data(&live, file->block,
+        if (ifs_ffs_data_block(&live, file,
                      offset_in_file / live.io.block_bytes, &block) != 0)
             return -1;
         physical_offset = (uint64_t)block * live.io.block_bytes + within;

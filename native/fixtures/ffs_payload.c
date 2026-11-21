@@ -297,7 +297,7 @@ static int write_target_metadata(AffsVolume *volume, const AmigaTarget *target,
                            target->data.values[data_offset + index]);
         }
         data_offset += list_count;
-        set_block_word(block, AMIGA_PARENT_LONG, parent);
+        set_block_word(block, AMIGA_PARENT_LONG, target->header);
         set_block_word(block, AMIGA_EXTENSION_LONG,
                        list_index + 1U < target->lists.count ? target->lists.values[list_index + 1U] : 0U);
         set_block_word(block, AMIGA_SUBTYPE_LONG, AMIGA_SUBTYPE_FILE);
