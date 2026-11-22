@@ -122,6 +122,12 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     if(!host_ok(h)||!volume||!info||info->structure_bytes<sizeof(*info))
         return IFS_FS_INVALID;
     *volume=NULL;
+#if defined(IFS_FFS_FIRMWARE_BUILD)
+    /* The freestanding descriptor advertises no write operations.
+     * Reject a writable Common V2 lease before native probing or I/O. */
+    if (!(h->capabilities&IFS_FS_HOST_READ_ONLY))
+        return IFS_FS_ACCESS;
+#endif
     if(s.mounted||s.generation==UINTPTR_MAX)return IFS_FS_BUSY;
     r=detect(h,&s.v,&variant);
     if(r)return r;

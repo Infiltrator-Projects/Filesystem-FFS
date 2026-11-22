@@ -64,7 +64,19 @@ if(BUILD_TESTING)
   target_include_directories(ffs-extension-media PRIVATE "${infiltratr_common_SOURCE_DIR}/include")
   target_compile_options(ffs-extension-media PRIVATE -Wall -Wextra -Werror)
   target_link_libraries(ffs-extension-media PRIVATE ${CMAKE_DL_LIBS})
-    add_executable(ffs-common-abi-test tests/test_ffs_common.c)
+    add_executable(ffs-firmware-readonly-test
+    tests/test_ffs_firmware_readonly.c
+    module/ffs_common.c
+    "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs/module/ffs_module.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs/core/ffs_core.c"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs/core/ffs_primitives.c")
+  target_include_directories(ffs-firmware-readonly-test PRIVATE
+    "${infiltratr_common_SOURCE_DIR}/include"
+    "${CMAKE_CURRENT_SOURCE_DIR}/native/filesystems/ffs/module")
+  target_compile_definitions(ffs-firmware-readonly-test PRIVATE IFS_FFS_FIRMWARE_BUILD=1)
+  target_compile_options(ffs-firmware-readonly-test PRIVATE -Wall -Wextra -Wpedantic -Werror)
+  add_test(NAME ffs-firmware-readonly-lease COMMAND ffs-firmware-readonly-test)
+  add_executable(ffs-common-abi-test tests/test_ffs_common.c)
     target_include_directories(ffs-common-abi-test PRIVATE
         "${FFS}/module" "${CMAKE_CURRENT_SOURCE_DIR}/include")
     target_link_libraries(ffs-common-abi-test PRIVATE ffs-unified InfiltratrCommon::Common)
