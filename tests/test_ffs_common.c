@@ -91,6 +91,17 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->probe(&ro,&variant)==IFS_FS_OK && variant==1u);
     CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
     CHECK(info.variant==1u && info.total_bytes==media.size);
+    const uint32_t extension_count=total_maps>25u?(total_maps-25u+126u)/127u:0u;
+    const uint64_t expected=(uint64_t)(blocks-3u-total_maps-extension_count)*512u;
+    CHECK(info.free_bytes==expected);
+    info.free_bytes=0u;
+    CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
+    /* A damaged bitmap checksum cannot become a plausible free count. */
+    uint8_t *first_map=media.bytes+(uint64_t)word(r,79u)*512u;
+    first_map[0]^=1u;
+    CHECK(vol->query(session,&info)==IFS_FS_CORRUPT && info.free_bytes==0u);
+    first_map[0]^=1u;
+    CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
     CHECK(core->stat(session,"/",&entry)==IFS_FS_OK && entry.type==IFS_FS_ENTRY_DIRECTORY);
     CHECK(core->directory_entry(session,"/",0u,&entry)==IFS_FS_END);
     CHECK(vol->format(&h,1u,"TEST",0u)==IFS_FS_BUSY);

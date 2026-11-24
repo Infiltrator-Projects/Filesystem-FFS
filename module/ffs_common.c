@@ -140,6 +140,105 @@ static int guarded_probe(const IfsFsHostRuntimeV2 *h,uint32_t *variant)
     return v2_leave_operation(probe(h,variant));
 }
 
+/* Measure free space from the on-media AFFS allocation bitmap. Its
+ * pointers are relative to the partition, its bits start at block two,
+ * and its root tail layout is independent of the filesystem block size.
+ * Never interpret an invalid/dirty bitmap as a fully allocated volume. */
+static uint32_t bitmap_word(const uint8_t *p,uint32_t i)
+{
+    p+=i*4u;
+    return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|
+           ((uint32_t)p[2]<<8)|p[3];
+}
+static int bitmap_read(uint32_t number,uint8_t *p)
+{
+    if(number<2u || number>=s.v.blocks)return IFS_FS_CORRUPT;
+    return ifs_fs_host_read_bytes_v2(&s.io,
+        (uint64_t)number*s.v.io.block_bytes,p,s.v.io.block_bytes);
+}
+static int bitmap_checksum(const uint8_t *p,uint32_t words)
+{
+    uint32_t sum=0u;
+    for(uint32_t i=0;i<words;++i)sum+=bitmap_word(p,i);
+    return sum==0u;
+}
+/* Open-addressed set bounds duplicate/cycle detection to the number of
+ * bitmap and extension blocks rather than the entire volume geometry.
+ * Zero is an empty slot; legal metadata block numbers start at two. */
+static int bitmap_remember(uint32_t *set,size_t capacity,uint32_t number)
+{
+    size_t i=(size_t)((uint64_t)number*UINT32_C(2654435761))&(capacity-1u);
+    while(set[i]) {
+        if(set[i]==number)return IFS_FS_CORRUPT;
+        i=(i+1u)&(capacity-1u);
+    }
+    set[i]=number;
+    return IFS_FS_OK;
+}
+static int measured_free_bytes(uint64_t *out)
+{
+    *out=0u;
+    const uint32_t bs=s.v.io.block_bytes,words=bs/4u;
+    const uint32_t bits=(words-1u)*32u;
+    const uint64_t span=(uint64_t)s.v.blocks-2u;
+    const uint32_t maps=(uint32_t)((span+bits-1u)/bits);
+    const uint32_t exts=maps>25u?(maps-25u+words-2u)/(words-1u):0u;
+    size_t capacity=1u;
+    while(capacity<2u*((size_t)maps+exts+1u))capacity*=2u;
+    uint8_t *buf=s.io.allocate(s.io.context,(size_t)bs*2u);
+    if(!buf)return IFS_FS_NO_MEMORY;
+    uint32_t *seen=s.io.allocate(s.io.context,capacity*sizeof(*seen));
+    if(!seen){s.io.release(s.io.context,buf);return IFS_FS_NO_MEMORY;}
+    memset(seen,0,capacity*sizeof(*seen));
+    uint8_t *ptrs=buf,*map=buf+bs;
+    int rc=bitmap_read(s.v.root_block,ptrs);
+    if(rc!=IFS_FS_OK)goto done;
+    if(!bitmap_checksum(ptrs,words) || bitmap_word(ptrs,0u)!=2u ||
+       bitmap_word(ptrs,words-1u)!=1u) {rc=IFS_FS_CORRUPT;goto done;}
+    if(bitmap_word(ptrs,words-50u)!=UINT32_MAX) {
+        rc=IFS_FS_UNSUPPORTED;goto done;
+    }
+    rc=bitmap_remember(seen,capacity,s.v.root_block);
+    if(rc!=IFS_FS_OK)goto done;
+    uint32_t slot=words-49u,limit=words-24u;
+    uint32_t next=bitmap_word(ptrs,limit);
+    uint64_t free_blocks=0u;
+    for(uint32_t i=0u;i<maps;++i) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context)) {
+            rc=IFS_FS_BUSY;goto done;
+        }
+        if(slot==limit) {
+            if(next<2u || next>=s.v.blocks) {rc=IFS_FS_CORRUPT;goto done;}
+            rc=bitmap_remember(seen,capacity,next);
+            if(rc!=IFS_FS_OK)goto done;
+            rc=bitmap_read(next,ptrs);if(rc!=IFS_FS_OK)goto done;
+            slot=0u;limit=words-1u;next=bitmap_word(ptrs,limit);
+        }
+        const uint32_t number=bitmap_word(ptrs,slot++);
+        if(number<2u || number>=s.v.blocks) {rc=IFS_FS_CORRUPT;goto done;}
+        rc=bitmap_remember(seen,capacity,number);if(rc!=IFS_FS_OK)goto done;
+        rc=bitmap_read(number,map);if(rc!=IFS_FS_OK)goto done;
+        if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
+        const uint64_t start=(uint64_t)i*bits;
+        uint32_t valid=(uint32_t)(span-start<bits?span-start:bits);
+        /* Count only addressable bits: unused tail bits are not storage. */
+        for(uint32_t w=1u;valid;++w) {
+            uint32_t value=bitmap_word(map,w);
+            const uint32_t n=valid<32u?valid:32u;
+            if(n<32u)value&=(UINT32_C(1)<<n)-1u;
+            while(value){value&=value-1u;++free_blocks;}
+            valid-=n;
+        }
+    }
+    if(next){rc=IFS_FS_CORRUPT;goto done;}
+    *out=free_blocks*bs;
+    rc=IFS_FS_OK;
+done:
+    s.io.release(s.io.context,seen);
+    s.io.release(s.io.context,buf);
+    return rc;
+}
+
 static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
                  IfsFsVolumeInfoV2 *info){
     uint32_t variant;int r;
@@ -169,7 +268,10 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     info->variant=variant;info->max_name_bytes=60u;
     info->block_bytes=s.v.io.block_bytes;
     info->total_bytes=s.v.io.volume_bytes;
-    info->free_bytes=0u; /* Not provided by the current read engine. */
+    /* The namespace remains readable even when its allocation map is
+     * dirty or missing. A subsequent explicit volume query reports the
+     * allocation error; mount itself keeps the conservative zero value. */
+    (void)measured_free_bytes(&info->free_bytes);
     *volume=(void *)s.handle;
     return IFS_FS_OK;
 }
@@ -375,8 +477,7 @@ static int v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info){
     info->block_bytes=s.v.io.block_bytes;
     info->max_name_bytes=60u;
     info->total_bytes=s.v.io.volume_bytes;
-    info->free_bytes=0u; /* Not reported by the read-only engine. */
-    return IFS_FS_OK;
+    return measured_free_bytes(&info->free_bytes);
 }
 static int guarded_v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info)
 {
