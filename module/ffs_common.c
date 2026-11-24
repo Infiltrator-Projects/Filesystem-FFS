@@ -729,15 +729,31 @@ static int guarded_format_dos1(const IfsFsHostRuntimeV2 *h,uint32_t variant,
 
 #endif /* hosted format */
 
+/* Native label bytes are Latin-1; the V2 name is UTF-8. Preserve the
+ * precise host failure and never emit a truncated multibyte sequence. */
+static int volume_label(void *handle,char *out,uint32_t capacity,uint32_t *bytes)
+{
+    if (!bytes) return IFS_FS_INVALID;
+    *bytes=0u;
+    if (!out || !capacity) return IFS_FS_INVALID;
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    if (!live(handle)) return v2_leave_operation(IFS_FS_INVALID);
+    last_read_error=IFS_FS_OK;
+    uint8_t raw[30];
+    uint32_t length=0;
+    if (ifs_ffs_volume_label(&s.v,raw,&length)!=0)
+        return v2_leave_operation(last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT);
+    return v2_leave_operation(convert_name(raw,length,out,capacity,bytes));
+}
 static const IfsFsVolumeOpsV2 volume_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsVolumeOpsV2),
              IFS_FS_GROUP_VOLUME,0u,
-             IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC
+             IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC|IFS_FS_VOLUME_LABEL_GET
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
              |IFS_FS_VOLUME_FORMAT
 #endif
     },
-    .query=guarded_v2_query_volume,.sync=guarded_v2_sync_volume
+    .query=guarded_v2_query_volume,.sync=guarded_v2_sync_volume,.label=volume_label
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
     ,.format=guarded_format_dos1
 #endif

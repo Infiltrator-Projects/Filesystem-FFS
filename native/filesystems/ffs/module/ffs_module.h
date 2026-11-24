@@ -57,6 +57,7 @@ typedef struct {
 } IfsFfsDropInModule;
 /* Private on-media reader. Public operations use Common V2 only. */
 const IfsFfsDropInModule *ifs_ffs_native_read_ops(void);
+int ifs_ffs_volume_label(const IfsFfsDropInVolume *,uint8_t name[30],uint32_t *length);
 
 /* Source-owned existing-data writer, not a second filesystem ABI.
  * Overwrite allocated bytes of an existing regular file only. The host must

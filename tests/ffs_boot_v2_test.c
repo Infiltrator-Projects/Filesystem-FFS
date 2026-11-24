@@ -142,6 +142,12 @@ int main(int argc,char **argv)
     void *volume=NULL;
     REQUIRE(core->mount(&host,&volume,&info)==IFS_FS_OK&&volume&&
             info.variant==1u&&info.block_bytes==BS);
+    const IfsFsVolumeOpsV2 *ops=(const void *)ifs_fs_group_v2(api,IFS_FS_GROUP_VOLUME);
+    char volume_name[64];
+    uint32_t volume_name_bytes=UINT32_MAX;
+    REQUIRE(ops && ops->label && !ops->set_label);
+    REQUIRE(ops->label(volume,volume_name,sizeof(volume_name),&volume_name_bytes)==IFS_FS_OK &&
+            volume_name_bytes==7u && !strcmp(volume_name,"FFSROOT"));
     REQUIRE(contains_entry(core,volume,"/","System")==1);
     REQUIRE(contains_entry(core,volume,"/","vmlinuz")==1);
     REQUIRE(contains_entry(core,volume,"/System","Kernel")==1);

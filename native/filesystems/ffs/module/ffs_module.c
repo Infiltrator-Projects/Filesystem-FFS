@@ -122,6 +122,23 @@ static int mount_volume(IfsFfsDropInVolume *v, const IfsFfsDropInIo *io)
     v->mounted = 0u;
     return -1;
 }
+/* The volume label lives in the checksum-protected root block, not in
+ * the boot block or a synthetic path name. Reuse the native root validator. */
+int ifs_ffs_volume_label(const IfsFfsDropInVolume *v,uint8_t name[30],uint32_t *length)
+{
+    uint8_t bytes[32768];
+    if (!v || !name || !length || !v->mounted) return -1;
+    *length=0;
+    IfsFfsDropInEntry root={v->root_block,0u,IFS_FFS_DIRECTORY};
+    if (directory(v,&root,bytes)!=0) return -1;
+    uint32_t base=v->io.block_bytes-80u,n=bytes[base];
+    if (n>30u || (n && ifs_ffs_validate_name(bytes+base+1u,n,1)!=IFS_FFS_NAME_OK))
+        return -1;
+    for (uint32_t i=0;i<n;++i) name[i]=bytes[base+1u+i];
+    *length=n;
+    return 0;
+}
+
 static IfsFfsDropInEntry module_root(const IfsFfsDropInVolume *v)
 {
     IfsFfsDropInEntry e = {0u, 0u, IFS_FFS_DIRECTORY};

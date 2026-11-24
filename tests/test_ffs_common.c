@@ -91,6 +91,13 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->probe(&ro,&variant)==IFS_FS_OK && variant==1u);
     CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
     CHECK(info.variant==1u && info.total_bytes==media.size);
+    char label[64],small[2]={'X','X'};
+    uint32_t label_bytes=UINT32_MAX;
+    CHECK(vol->label && !vol->set_label);
+    CHECK(vol->label(session,label,sizeof(label),&label_bytes)==IFS_FS_OK &&
+          label_bytes==4u && !strcmp(label,"TEST"));
+    CHECK(vol->label(session,small,sizeof(small),&label_bytes)==IFS_FS_NO_SPACE &&
+          !label_bytes && small[0]=='X' && small[1]=='X');
     const uint32_t extension_count=total_maps>25u?(total_maps-25u+126u)/127u:0u;
     const uint64_t expected=(uint64_t)(blocks-3u-total_maps-extension_count)*512u;
     CHECK(info.free_bytes==expected);
