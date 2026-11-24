@@ -17,8 +17,17 @@
 } } while(0)
 enum {BS=32768u,BLOCKS=4096u};
 typedef struct { FILE *file;uint64_t size,fail_at;uint32_t calls; } Disk;
+static const IfsFsCoreOpsV2 *unmount_during_read;
+static void *active_volume;
+static int observed_unmount;
 static int media_read(void *ctx,uint64_t offset,void *p,uint32_t n)
 {
+    if (unmount_during_read) {
+        const IfsFsCoreOpsV2 *ops=unmount_during_read;
+        unmount_during_read=NULL;
+        observed_unmount=ops->unmount(active_volume);
+        if (observed_unmount!=IFS_FS_BUSY) return -1;
+    }
     Disk *d=ctx;
     if(!p||!n||offset==d->fail_at||offset%512u||n%512u||
        offset>d->size||n>d->size-offset||offset>INT64_MAX)return -1;
@@ -72,9 +81,13 @@ static int compare_content(const IfsFsCoreOpsV2 *core,void *volume,
     while(offset<(uint64_t)st.st_size) {
         size_t count=(uint64_t)st.st_size-offset<sizeof(observed)?
             (size_t)((uint64_t)st.st_size-offset):sizeof(observed);
+        active_volume=volume;
+        unmount_during_read=core;
+        observed_unmount=IFS_FS_INVALID;
         if(fread(reference,1,count,fp)!=count ||
            core->read(volume,path,offset,observed,(uint32_t)count)!=IFS_FS_OK||
            memcmp(observed,reference,count)!=0){fclose(fp);return -1;}
+        if (unmount_during_read || observed_unmount!=IFS_FS_BUSY) {fclose(fp);return -1;}
         offset+=count;
     }
     if(fclose(fp))return -1;

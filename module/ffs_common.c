@@ -6,6 +6,23 @@
 #include <infiltratr/filesystem_module_v2.h>
 #include <stdint.h>
 #include <string.h>
+#include <stdatomic.h>
+
+/* The native engine has one active image and shared scratch/IO state.
+ * Enforce exclusion inside the V2 provider, not merely in its callers.
+ * A reentrant host callback must receive BUSY rather than deadlocking
+ * or replacing the device while a transfer is in progress. */
+static atomic_flag v2_operation_gate=ATOMIC_FLAG_INIT;
+static int v2_enter_operation(void)
+{
+    return !atomic_flag_test_and_set_explicit(&v2_operation_gate,memory_order_acquire);
+}
+static int v2_leave_operation(int rc)
+{
+    atomic_flag_clear_explicit(&v2_operation_gate,memory_order_release);
+    return rc;
+}
+
 static struct {
     IfsFfsDropInVolume v;
     IfsFsHostRuntimeV2 io;
@@ -116,6 +133,13 @@ static int probe(const IfsFsHostRuntimeV2 *h,uint32_t *variant){
     if(!host_ok(h))return IFS_FS_INVALID;
     return detect(h,&v,variant);
 }
+static int guarded_probe(const IfsFsHostRuntimeV2 *h,uint32_t *variant)
+{
+    if (variant) *variant=0u;
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(probe(h,variant));
+}
+
 static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
                  IfsFsVolumeInfoV2 *info){
     uint32_t variant;int r;
@@ -149,11 +173,25 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     *volume=(void *)s.handle;
     return IFS_FS_OK;
 }
+static int guarded_mount(const IfsFsHostRuntimeV2 *h,void **volume,
+                 IfsFsVolumeInfoV2 *info)
+{
+    if (volume) *volume=NULL;
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(mount(h,volume,info));
+}
+
 static int unmount(void *volume){
     if(!live(volume))return IFS_FS_INVALID;
     s.v.mounted=0u;s.mounted=0;s.handle=0;
     return IFS_FS_OK;
 }
+static int guarded_unmount(void *volume)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(unmount(volume));
+}
+
 static int utf8_to_latin1(const char *src,uint32_t length,
                           uint8_t out[31],uint32_t *count) {
     uint32_t i=0,n=0;
@@ -241,6 +279,12 @@ static int stat_path(void *volume,const char *path,IfsFsEntryV2 *out){
     int r=path_entry(path,&e,&name,&n);
     return r?r:fill(out,&e,name,n);
 }
+static int guarded_stat_path(void *volume,const char *path,IfsFsEntryV2 *out)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(stat_path(volume,path,out));
+}
+
 static int nth(void *volume,const char *dir,uint32_t index,IfsFsEntryV2 *out){
     IfsFfsDropInEntry parent={0},e={0};
     const char *name;uint32_t n;uint8_t raw[31];uint32_t length=0;
@@ -267,6 +311,12 @@ static int nth(void *volume,const char *dir,uint32_t index,IfsFsEntryV2 *out){
        IFS_FS_ENTRY_DIRECTORY:IFS_FS_ENTRY_FILE;
     return IFS_FS_OK;
 }
+static int guarded_nth(void *volume,const char *dir,uint32_t index,IfsFsEntryV2 *out)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(nth(volume,dir,index,out));
+}
+
 static int read_file(void *volume,const char *path,uint64_t offset,
                      void *dest,uint32_t len) {
     IfsFfsDropInEntry e={0};const char *name;uint32_t n;
@@ -281,6 +331,13 @@ static int read_file(void *volume,const char *path,uint64_t offset,
         IFS_FS_OK:(last_read_error!=IFS_FS_OK?
                   last_read_error:IFS_FS_CORRUPT);
 }
+static int guarded_read_file(void *volume,const char *path,uint64_t offset,
+                     void *dest,uint32_t len)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(read_file(volume,path,offset,dest,len));
+}
+
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
 static int write_file(void *volume,const char *path,uint64_t offset,
                       const void *data,uint32_t len){
@@ -301,6 +358,13 @@ static int write_file(void *volume,const char *path,uint64_t offset,
         (uint32_t)offset,data,len);
     return r==0?IFS_FS_OK:IFS_FS_IO_ERROR;
 }
+static int guarded_write_file(void *volume,const char *path,uint64_t offset,
+                      const void *data,uint32_t len)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(write_file(volume,path,offset,data,len));
+}
+
 #endif /* !IFS_FFS_FIRMWARE_BUILD */
 
 /* V2 volume inquiry uses the mounted native reader. */
@@ -314,6 +378,12 @@ static int v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info){
     info->free_bytes=0u; /* Not reported by the read-only engine. */
     return IFS_FS_OK;
 }
+static int guarded_v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(v2_query_volume(volume,info));
+}
+
 /* Flush through the actual mounted provider's host, not an external
  * filesystem utility. Read-only mounts have no outstanding dirty buffers. */
 static int v2_sync_volume(void *volume){
@@ -323,6 +393,12 @@ static int v2_sync_volume(void *volume){
         return IFS_FS_ACCESS;
     return s.io.flush(s.io.context)==0 ? IFS_FS_OK : IFS_FS_IO_ERROR;
 }
+static int guarded_v2_sync_volume(void *volume)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(v2_sync_volume(volume));
+}
+
 /* One direct V2 CORE/VOLUME contract. Never claim unqualified repair,
  * allocation mutation or DEFRAG callbacks. */
 /* Source-owned, read-only Common V2 per-file extent enumeration.
@@ -374,10 +450,18 @@ static int map_file(void *volume,const char *path,uint64_t first,
     *written=(uint32_t)count;
     return IFS_FS_OK;
 }
+static int guarded_map_file(void *volume,const char *path,uint64_t first,
+                    IfsFsExtentV2 *out,uint32_t capacity,uint32_t *written)
+{
+    if (written) *written=0u;
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(map_file(volume,path,first,out,capacity,written));
+}
+
 static const IfsFsDefragOpsV2 defrag_map_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsDefragOpsV2),
              IFS_FS_GROUP_DEFRAG,0u,IFS_FS_DEFRAG_MAP},
-    .map=map_file
+    .map=guarded_map_file
 };
 static const IfsFsCoreOpsV2 core={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsCoreOpsV2),
@@ -388,10 +472,10 @@ static const IfsFsCoreOpsV2 core={
 #else
              IFS_FS_CORE_LIST|IFS_FS_CORE_READ|IFS_FS_CORE_WRITE},
 #endif
-    .probe=probe,.mount=mount,.unmount=unmount,
-    .stat=stat_path,.directory_entry=nth,.read=read_file
+    .probe=guarded_probe,.mount=guarded_mount,.unmount=guarded_unmount,
+    .stat=guarded_stat_path,.directory_entry=guarded_nth,.read=guarded_read_file
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-    ,.write=write_file
+    ,.write=guarded_write_file
 #endif
 };
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
@@ -535,6 +619,13 @@ static int format_dos1(const IfsFsHostRuntimeV2 *h,uint32_t variant,
     rc=probe(h,&observed);
     return rc!=IFS_FS_OK?rc:observed==1u?IFS_FS_OK:IFS_FS_CORRUPT;
 }
+static int guarded_format_dos1(const IfsFsHostRuntimeV2 *h,uint32_t variant,
+                       const char *label,uint32_t flags)
+{
+    if (!v2_enter_operation()) return IFS_FS_BUSY;
+    return v2_leave_operation(format_dos1(h,variant,label,flags));
+}
+
 #endif /* hosted format */
 
 static const IfsFsVolumeOpsV2 volume_ops={
@@ -545,9 +636,9 @@ static const IfsFsVolumeOpsV2 volume_ops={
              |IFS_FS_VOLUME_FORMAT
 #endif
     },
-    .query=v2_query_volume,.sync=v2_sync_volume
+    .query=guarded_v2_query_volume,.sync=guarded_v2_sync_volume
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-    ,.format=format_dos1
+    ,.format=guarded_format_dos1
 #endif
 };
 static const IfsFsGroupHeaderV2 *query_group(uint32_t id,
