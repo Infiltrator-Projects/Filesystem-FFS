@@ -27,6 +27,8 @@ int main(void)
     CHECK(core && core->mount && core->probe &&
           core->read && core->stat && core->directory_entry &&
           !core->write && !core->create && !core->remove);
+    const IfsFsVolumeOpsV2 *vol=(const void*)ifs_fs_group_v2(api,IFS_FS_GROUP_VOLUME);
+    CHECK(vol && !vol->format);
     Media media={0};
     IfsFsHostRuntimeV2 host={0};
     host.abi_version=IFS_FS_HOST_ABI_V2;

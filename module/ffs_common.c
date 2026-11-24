@@ -303,7 +303,7 @@ static int write_file(void *volume,const char *path,uint64_t offset,
 }
 #endif /* !IFS_FFS_FIRMWARE_BUILD */
 
-/* V2 provides only real volume inquiry; no unsupported repair/format claim. */
+/* V2 volume inquiry uses the mounted native reader. */
 static int v2_query_volume(void *volume,IfsFsVolumeInfoV2 *info){
     if(!live(volume)||!info||info->structure_bytes<sizeof(*info))
         return IFS_FS_INVALID;
@@ -323,8 +323,8 @@ static int v2_sync_volume(void *volume){
         return IFS_FS_ACCESS;
     return s.io.flush(s.io.context)==0 ? IFS_FS_OK : IFS_FS_IO_ERROR;
 }
-/* One direct V2 CORE/VOLUME contract. Never claim unqualified format,
- * repair, allocation mutation or DEFRAG callbacks. */
+/* One direct V2 CORE/VOLUME contract. Never claim unqualified repair,
+ * allocation mutation or DEFRAG callbacks. */
 /* Source-owned, read-only Common V2 per-file extent enumeration.
  * A page is fully verified before exposing any returned extent; never
  * infer an allocation from a short or corrupt file-extension chain.
@@ -394,11 +394,161 @@ static const IfsFsCoreOpsV2 core={
     ,.write=write_file
 #endif
 };
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+/* DOS1 empty-volume formatter. The FFS provider owns all disk structures;
+ * callers supply only a verified, exclusive Common V2 host. The bitmap
+ * geometry is the same as the repository's original FFS fixture codec.
+ * Publish the boot identity last, after root and allocation metadata. */
+enum { FORMAT_BLOCK=512u, FORMAT_WORDS=128u, FORMAT_MAP_BITS=4064u,
+       FORMAT_DIRECT_MAPS=25u, FORMAT_EXTENSION_MAPS=127u };
+static void format_word(uint8_t *b,uint32_t index,uint32_t value)
+{
+    uint8_t *p=b+index*4u;
+    p[0]=(uint8_t)(value>>24);p[1]=(uint8_t)(value>>16);
+    p[2]=(uint8_t)(value>>8);p[3]=(uint8_t)value;
+}
+static uint32_t format_read_word(const uint8_t *b,uint32_t index)
+{
+    const uint8_t *p=b+index*4u;
+    return ((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|
+           ((uint32_t)p[2]<<8)|p[3];
+}
+static void format_checksum(uint8_t *b,uint32_t field)
+{
+    uint32_t sum=0u;
+    format_word(b,field,0u);
+    for(uint32_t i=0u;i<FORMAT_WORDS;++i)sum+=format_read_word(b,i);
+    format_word(b,field,0u-sum);
+}
+static uint32_t format_metadata_block(uint32_t ordinal,uint32_t root)
+{
+    const uint32_t block=ordinal+2u;
+    return block>=root?block+1u:block;
+}
+static int format_dos1(const IfsFsHostRuntimeV2 *h,uint32_t variant,
+                       const char *label,uint32_t flags)
+{
+    if(!host_ok(h))return IFS_FS_INVALID;
+    if((h->capabilities&IFS_FS_HOST_READ_ONLY) ||
+       !(h->capabilities&IFS_FS_HOST_EXCLUSIVE) ||
+       !(h->capabilities&IFS_FS_HOST_DURABLE))return IFS_FS_ACCESS;
+    if(s.mounted)return IFS_FS_BUSY;
+    if(variant!=1u || flags || h->logical_sector_bytes!=FORMAT_BLOCK ||
+       h->volume_bytes%FORMAT_BLOCK)return IFS_FS_UNSUPPORTED;
+    const uint64_t count=h->volume_bytes/FORMAT_BLOCK;
+    /* Bound initial qualification to 512-byte DOS1 media up to 2 GiB.
+     * Other geometry and DOS3/5 remain readable, but not format-enabled. */
+    if(count<1024u || count>4194304u)return IFS_FS_UNSUPPORTED;
+    const uint32_t blocks=(uint32_t)count;
+    const uint32_t root=(blocks+1u)/2u;
+    const uint32_t maps=(blocks-2u+FORMAT_MAP_BITS-1u)/FORMAT_MAP_BITS;
+    const uint32_t extensions=maps>FORMAT_DIRECT_MAPS?
+        (maps-FORMAT_DIRECT_MAPS+FORMAT_EXTENSION_MAPS-1u)/FORMAT_EXTENSION_MAPS:0u;
+    const uint32_t last=format_metadata_block(maps+extensions-1u,root);
+    if(last>=blocks)return IFS_FS_UNSUPPORTED;
+    uint8_t name[31]={0};
+    uint32_t name_bytes=0u;
+    if(label && *label) {
+        const size_t bytes=strlen(label);
+        if(bytes>60u || utf8_to_latin1(label,(uint32_t)bytes,name,&name_bytes)!=IFS_FS_OK)
+            return IFS_FS_INVALID;
+        for(uint32_t i=0u;i<name_bytes;++i)
+            if(name[i]<32u || name[i]==':')return IFS_FS_INVALID;
+    } else { memcpy(name,"Untitled",8u);name_bytes=8u; }
+
+    uint8_t boot[1024]={0},block[FORMAT_BLOCK]={0};
+    int rc=ifs_fs_host_write_bytes_v2(h,0u,boot,sizeof(boot));
+    if(rc!=IFS_FS_OK)return rc;
+    if(h->flush(h->context)!=0)return IFS_FS_IO_ERROR;
+
+    /* AFFS bitmap bits enumerate disk blocks beginning at block two:
+     * one means free, zero means allocated or outside the volume. */
+    for(uint32_t i=0u;i<maps;++i) {
+        memset(block,0,sizeof(block));
+        for(uint32_t word=0u;word<127u;++word) {
+            uint32_t value=0u;
+            for(uint32_t bit=0u;bit<32u;++bit) {
+                const uint32_t disk=2u+i*FORMAT_MAP_BITS+word*32u+bit;
+                if(disk<blocks && disk>last && disk!=root)
+                    value|=UINT32_C(1)<<bit;
+            }
+            format_word(block,word+1u,value);
+        }
+        format_checksum(block,0u);
+        rc=ifs_fs_host_write_bytes_v2(h,
+            (uint64_t)format_metadata_block(i,root)*FORMAT_BLOCK,
+            block,sizeof(block));
+        if(rc!=IFS_FS_OK)return rc;
+    }
+    /* Each extension has 127 bitmap pointers plus its next extension.
+     * No checksum occupies a bitmap-extension pointer slot. */
+    for(uint32_t i=0u;i<extensions;++i) {
+        memset(block,0,sizeof(block));
+        const uint32_t start=FORMAT_DIRECT_MAPS+i*FORMAT_EXTENSION_MAPS;
+        for(uint32_t j=0u;j<FORMAT_EXTENSION_MAPS && start+j<maps;++j)
+            format_word(block,j,format_metadata_block(start+j,root));
+        if(i+1u<extensions)
+            format_word(block,127u,format_metadata_block(maps+i+1u,root));
+        rc=ifs_fs_host_write_bytes_v2(h,
+            (uint64_t)format_metadata_block(maps+i,root)*FORMAT_BLOCK,
+            block,sizeof(block));
+        if(rc!=IFS_FS_OK)return rc;
+    }
+    memset(block,0,sizeof(block));
+    format_word(block,0u,2u); /* primary header type */
+    format_word(block,3u,72u); /* directory hash buckets */
+    format_word(block,78u,UINT32_MAX); /* valid allocation bitmap */
+    for(uint32_t i=0u;i<maps && i<FORMAT_DIRECT_MAPS;++i)
+        format_word(block,79u+i,format_metadata_block(i,root));
+    if(extensions)format_word(block,104u,format_metadata_block(maps,root));
+    block[432]=(uint8_t)name_bytes;
+    memcpy(block+433,name,name_bytes);
+    format_word(block,127u,1u); /* root secondary type */
+    format_checksum(block,5u);
+    rc=ifs_fs_host_write_bytes_v2(h,(uint64_t)root*FORMAT_BLOCK,block,sizeof(block));
+    if(rc!=IFS_FS_OK)return rc;
+    if(h->flush(h->context)!=0)return IFS_FS_IO_ERROR;
+
+    memcpy(boot,"DOS",3u);boot[3]=1u;
+    format_word(boot,2u,root);
+    /* Amiga boot blocks use end-around-carry addition, unlike the
+     * ordinary metadata block checksum. */
+    uint32_t sum=0u;
+    for(uint32_t i=0u;i<256u;++i) {
+        const uint32_t word=format_read_word(boot,i);
+        const uint32_t next=sum+word;
+        sum=next+(next<sum?1u:0u);
+    }
+    format_word(boot,1u,~sum);
+    /* Write the second boot block before making the signature visible. */
+    rc=ifs_fs_host_write_bytes_v2(h,FORMAT_BLOCK,boot+FORMAT_BLOCK,FORMAT_BLOCK);
+    if(rc!=IFS_FS_OK)return rc;
+    rc=ifs_fs_host_write_bytes_v2(h,0u,boot,FORMAT_BLOCK);
+    if(rc!=IFS_FS_OK)return rc;
+    if(h->flush(h->context)!=0) {
+        memset(boot,0,sizeof(boot));
+        (void)ifs_fs_host_write_bytes_v2(h,0u,boot,sizeof(boot));
+        (void)h->flush(h->context);
+        return IFS_FS_IO_ERROR;
+    }
+    uint32_t observed=0u;
+    rc=probe(h,&observed);
+    return rc!=IFS_FS_OK?rc:observed==1u?IFS_FS_OK:IFS_FS_CORRUPT;
+}
+#endif /* hosted format */
+
 static const IfsFsVolumeOpsV2 volume_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsVolumeOpsV2),
              IFS_FS_GROUP_VOLUME,0u,
-             IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC},
+             IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+             |IFS_FS_VOLUME_FORMAT
+#endif
+    },
     .query=v2_query_volume,.sync=v2_sync_volume
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+    ,.format=format_dos1
+#endif
 };
 static const IfsFsGroupHeaderV2 *query_group(uint32_t id,
                                                uint32_t minimum,uint32_t maximum)
