@@ -3,6 +3,7 @@
  * The canonical FFS drop-in engine owns all on-disk parsing and mutation.
  */
 #include "ffs_module.h"
+#include "../native/filesystems/ffs/core/ffs_primitives.h"
 #include <infiltratr/filesystem_module_v2.h>
 #include <stdint.h>
 #include <string.h>
@@ -29,6 +30,8 @@ static struct {
     uintptr_t generation,handle;
     uint32_t variant;
     int mounted;
+    int growth_ready,write_fault;
+    uint32_t growth_first,growth_hint;
 } s;
 /* The native FFS reader returns 0/-1. Preserve the precise Common V2
  * host failure instead of treating an unavailable sector as missing files,
@@ -264,6 +267,7 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     /* The native engine retains this callback context through unmount. */
     s.v.io.context=&s.io;
     s.variant=variant;s.mounted=1;
+    s.growth_ready=0;s.write_fault=0;s.growth_first=0;s.growth_hint=0;
     s.handle=++s.generation;
     info->variant=variant;info->max_name_bytes=60u;
     info->block_bytes=s.v.io.block_bytes;
@@ -445,6 +449,273 @@ static int guarded_read_file(void *volume,const char *path,uint64_t offset,
 }
 
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
+/* Native DOS1 creation/growth on the formatter's 512-byte layout.
+ * Stage full blocks, including bitmap and checksummed header changes,
+ * so ordinary write/flush errors can restore attempted blocks. This is
+ * not a power-loss journal; failed rollback disables further mutation.
+ * All metadata and allocation choices remain inside FFS.so. */
+enum { GROW_BS=512, GROW_WORDS=128, GROW_BITS=4064, GROW_PATCHES=160 };
+typedef struct {uint32_t number;uint8_t *old,*now;int dirty;} FfsPatch;
+typedef struct {FfsPatch p[GROW_PATCHES];unsigned count;uint32_t hint;} FfsTxn;
+static void grow_word(uint8_t *p,uint32_t i,uint32_t n)
+{
+    p+=4u*i;p[0]=(uint8_t)(n>>24);p[1]=(uint8_t)(n>>16);
+    p[2]=(uint8_t)(n>>8);p[3]=(uint8_t)n;
+}
+static void grow_checksum(uint8_t *p,uint32_t i)
+{
+    grow_word(p,i,0);uint32_t sum=0;
+    for(unsigned j=0;j<GROW_WORDS;++j)sum+=bitmap_word(p,j);
+    grow_word(p,i,0u-sum);
+}
+static uint32_t grow_metadata(uint32_t ordinal)
+{
+    uint32_t b=ordinal+2u;
+    return b>=s.v.root_block?b+1u:b;
+}
+/* Verify the exact formatter-owned allocation geometry once per mount.
+ * A foreign bitmap placement remains readable, but cannot use this
+ * bounded writer. Never allocate a root, bitmap or bitmap-extension
+ * block even if malformed media advertises it as free. */
+static int grow_profile(void *volume)
+{
+    if(!live(volume))return IFS_FS_INVALID;
+    if((s.io.capabilities&IFS_FS_HOST_READ_ONLY) ||
+       !(s.io.capabilities&IFS_FS_HOST_EXCLUSIVE) ||
+       !(s.io.capabilities&IFS_FS_HOST_DURABLE))return IFS_FS_ACCESS;
+    if(s.write_fault)return IFS_FS_IO_ERROR;
+    if(s.variant!=1u || s.v.io.block_bytes!=GROW_BS ||
+       s.io.logical_sector_bytes!=GROW_BS || s.v.blocks>4194304u ||
+       s.v.hash_size!=72u)return IFS_FS_UNSUPPORTED;
+    if(s.growth_ready)return IFS_FS_OK;
+    uint8_t root[512],ext[512],map[512];uint64_t free_bytes=0;
+    int rc=measured_free_bytes(&free_bytes);if(rc!=IFS_FS_OK)return rc;
+    rc=bitmap_read(s.v.root_block,root);if(rc!=IFS_FS_OK)return rc;
+    const uint32_t maps=(s.v.blocks-2u+GROW_BITS-1u)/GROW_BITS;
+    const uint32_t exts=maps>25u?(maps-25u+126u)/127u:0u;
+    const uint32_t last=grow_metadata(maps+exts-1u);
+    for(uint32_t i=0;i<maps;++i) {
+        uint32_t ptr;
+        if(i<25u)ptr=bitmap_word(root,79u+i);
+        else {
+            uint32_t e=(i-25u)/127u,k=(i-25u)%127u;
+            if(!k) {
+                uint32_t next=e?bitmap_word(ext,127u):bitmap_word(root,104u);
+                if(next!=grow_metadata(maps+e))return IFS_FS_UNSUPPORTED;
+                rc=bitmap_read(next,ext);if(rc!=IFS_FS_OK)return rc;
+            }
+            ptr=bitmap_word(ext,k);
+        }
+        if(ptr!=grow_metadata(i))return IFS_FS_UNSUPPORTED;
+        rc=bitmap_read(ptr,map);if(rc!=IFS_FS_OK)return rc;
+        for(uint32_t k=0;k<GROW_BITS;++k) {
+            uint32_t disk=2u+i*GROW_BITS+k;
+            if((disk<=last || disk==s.v.root_block || disk>=s.v.blocks) &&
+               (bitmap_word(map,1u+k/32u)&(UINT32_C(1)<<(k%32u))))
+                return IFS_FS_CORRUPT;
+        }
+    }
+    s.growth_first=last+1u;s.growth_hint=s.growth_first;
+    s.growth_ready=1;return IFS_FS_OK;
+}
+static void grow_release(FfsTxn *t)
+{
+    for(unsigned i=0;i<t->count;++i)s.io.release(s.io.context,t->p[i].old);
+}
+static int grow_patch(FfsTxn *t,uint32_t n,FfsPatch **out)
+{
+    if(n<2u || n>=s.v.blocks)return IFS_FS_CORRUPT;
+    for(unsigned i=0;i<t->count;++i)
+        if(t->p[i].number==n){*out=&t->p[i];return IFS_FS_OK;}
+    if(t->count>=GROW_PATCHES)return IFS_FS_NO_MEMORY;
+    uint8_t *raw=s.io.allocate(s.io.context,1024u);
+    if(!raw)return IFS_FS_NO_MEMORY;
+    int rc=bitmap_read(n,raw);
+    if(rc!=IFS_FS_OK){s.io.release(s.io.context,raw);return rc;}
+    memcpy(raw+512u,raw,512u);
+    FfsPatch *p=&t->p[t->count++];
+    *p=(FfsPatch){.number=n,.old=raw,.now=raw+512u};*out=p;
+    return IFS_FS_OK;
+}
+static int grow_commit(FfsTxn *t)
+{
+    unsigned attempted=0;int rc=IFS_FS_OK;
+    for(unsigned i=0;i<t->count;++i) {
+        FfsPatch *p=&t->p[i];
+        if(!p->dirty)continue;
+        if(s.io.cancelled && s.io.cancelled(s.io.context)){rc=IFS_FS_BUSY;break;}
+        attempted=i+1u;
+        rc=ifs_fs_host_write_bytes_v2(&s.io,(uint64_t)p->number*512u,p->now,512u);
+        if(rc!=IFS_FS_OK)break;
+    }
+    if(rc==IFS_FS_OK && s.io.flush(s.io.context)!=0)rc=IFS_FS_IO_ERROR;
+    if(rc!=IFS_FS_OK) {
+        int bad=0;
+        while(attempted) {
+            FfsPatch *p=&t->p[--attempted];
+            if(p->dirty && ifs_fs_host_write_bytes_v2(&s.io,(uint64_t)p->number*512u,
+                                       p->old,512u)!=IFS_FS_OK)bad=1;
+        }
+        if(s.io.flush(s.io.context)!=0)bad=1;
+        if(bad)s.write_fault=1;
+        return rc;
+    }
+    s.growth_hint=t->hint;return IFS_FS_OK;
+}
+static int grow_map(FfsTxn *t,uint32_t n,FfsPatch **map,uint32_t *word,uint32_t *mask)
+{
+    if(n<s.growth_first || n>=s.v.blocks || n==s.v.root_block)
+        return IFS_FS_CORRUPT;
+    uint32_t bit=n-2u;
+    int rc=grow_patch(t,grow_metadata(bit/GROW_BITS),map);
+    if(rc!=IFS_FS_OK)return rc;
+    if(!bitmap_checksum((*map)->now,128u))return IFS_FS_CORRUPT;
+    bit%=GROW_BITS;*word=1u+bit/32u;*mask=UINT32_C(1)<<(bit%32u);
+    return IFS_FS_OK;
+}
+static int grow_alloc(FfsTxn *t,FfsPatch **out)
+{
+    /* Scan whole bitmap words when searching for a free block. Keep
+     * the next allocation cursor across operations for interleaved growth. */
+    uint32_t start=t->hint;
+    if(start<s.growth_first || start>=s.v.blocks)start=s.growth_first;
+    uint32_t n=start;
+    do {
+        if(s.io.cancelled && s.io.cancelled(s.io.context))return IFS_FS_BUSY;
+        if(n!=s.v.root_block) {
+            FfsPatch *map;uint32_t word,mask;
+            int rc=grow_map(t,n,&map,&word,&mask);
+            if(rc!=IFS_FS_OK)return rc;
+            uint32_t val=bitmap_word(map->now,word);
+            if(val&mask) {
+                grow_word(map->now,word,val&~mask);grow_checksum(map->now,0);
+                map->dirty=1;
+                rc=grow_patch(t,n,out);if(rc!=IFS_FS_OK)return rc;
+                memset((*out)->now,0,512u);(*out)->dirty=1;
+                t->hint=n+1u;return IFS_FS_OK;
+            }
+        }
+        if(++n==s.v.blocks)n=s.growth_first;
+    }while(n!=start);
+    return IFS_FS_NO_SPACE;
+}
+static int grow_allocated(FfsTxn *t,uint32_t n)
+{
+    FfsPatch *map;uint32_t word,mask;
+    int rc=grow_map(t,n,&map,&word,&mask);
+    if(rc!=IFS_FS_OK)return rc;
+    return bitmap_word(map->now,word)&mask?IFS_FS_CORRUPT:IFS_FS_OK;
+}
+static int grow_create(void *volume,const char *path,uint32_t type)
+{
+    int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
+    if(type!=IFS_FS_ENTRY_FILE || !path || path[0]!='/' || !path[1] ||
+       strchr(path+1,'/') || !strcmp(path,"/.") || !strcmp(path,"/.."))
+        return IFS_FS_UNSUPPORTED;
+    size_t bytes=strlen(path+1);
+    if(bytes>60u)return IFS_FS_INVALID;
+    uint8_t name[31];uint32_t n;
+    rc=utf8_to_latin1(path+1,(uint32_t)bytes,name,&n);
+    if(rc!=IFS_FS_OK)return rc;
+    if(ifs_ffs_validate_name(name,n,1)!=IFS_FFS_NAME_OK)return IFS_FS_INVALID;
+    IfsFfsDropInEntry found={0};const char *base;uint32_t len;
+    last_read_error=IFS_FS_OK;rc=path_entry(path,&found,&base,&len);
+    if(rc==IFS_FS_OK)return IFS_FS_EXISTS;
+    if(rc!=IFS_FS_NOT_FOUND)return rc;
+    FfsTxn t={.hint=s.growth_hint};FfsPatch *root,*file;
+    rc=grow_patch(&t,s.v.root_block,&root);if(rc!=IFS_FS_OK)goto done;
+    if(!bitmap_checksum(root->now,128u) || bitmap_word(root->now,78u)!=UINT32_MAX) {
+        rc=IFS_FS_CORRUPT;goto done;
+    }
+    rc=grow_alloc(&t,&file);if(rc!=IFS_FS_OK)goto done;
+    const uint32_t bucket=ifs_ffs_directory_hash(name,n,72u,0);
+    grow_word(file->now,0,2u);grow_word(file->now,1,file->number);
+    grow_word(file->now,124,bitmap_word(root->now,6u+bucket));
+    grow_word(file->now,125,s.v.root_block);
+    grow_word(file->now,127,(uint32_t)-3);
+    file->now[432]=(uint8_t)n;memcpy(file->now+433,name,n);
+    grow_checksum(file->now,5);file->dirty=1;
+    grow_word(root->now,6u+bucket,file->number);grow_checksum(root->now,5);root->dirty=1;
+    rc=grow_commit(&t);
+done:
+    grow_release(&t);return rc;
+}
+static int guarded_grow_create(void *volume,const char *path,uint32_t type)
+{
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(grow_create(volume,path,type));
+}
+/* Walk the existing list chain without staging every unchanged page.
+ * Only the header, last occupied page, newly allocated list blocks and
+ * data blocks enter the mutation. Each old pointer page is checksummed. */
+static int grow_append(void *volume,const IfsFfsDropInEntry *e,
+                       uint64_t pos,const void *data,uint32_t len)
+{
+    int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
+    if(!data || !len || len>65536u || pos!=e->size ||
+       pos>UINT32_MAX || len>UINT32_MAX-pos)return IFS_FS_UNSUPPORTED;
+    FfsTxn t={.hint=s.growth_hint};FfsPatch *header,*page=NULL;
+    rc=grow_allocated(&t,e->block);if(rc!=IFS_FS_OK)goto done;
+    rc=grow_patch(&t,e->block,&header);if(rc!=IFS_FS_OK)goto done;
+    uint32_t used=(e->size+511ull)/512u;
+    uint32_t pages=used?(used-1u)/72u+1u:1u;
+    uint32_t number=e->block;
+    uint8_t raw[512];
+    for(uint32_t index=0;index<pages;++index) {
+        rc=bitmap_read(number,raw);if(rc!=IFS_FS_OK)goto done;
+        uint32_t count=used>index*72u?used-index*72u:0u;if(count>72u)count=72u;
+        if(!bitmap_checksum(raw,128u) || bitmap_word(raw,0)!=(index?16u:2u) ||
+           bitmap_word(raw,1)!=number || bitmap_word(raw,2)!=count ||
+           bitmap_word(raw,127)!=(uint32_t)-3 ||
+           (index && bitmap_word(raw,125)!=e->block)) {rc=IFS_FS_CORRUPT;goto done;}
+        uint32_t next=bitmap_word(raw,126);
+        if(index+1u==pages) {
+            if(next){rc=IFS_FS_CORRUPT;goto done;}
+            rc=grow_allocated(&t,number);if(rc!=IFS_FS_OK)goto done;
+            rc=grow_patch(&t,number,&page);if(rc!=IFS_FS_OK)goto done;
+        } else {
+            if(next<s.growth_first || next>=s.v.blocks ||
+               next==number || next==e->block || next==s.v.root_block) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+            number=next;
+        }
+    }
+    const uint8_t *src=data;
+    while(len) {
+        uint32_t logical=(uint32_t)(pos/512u),skip=(uint32_t)(pos%512u);
+        uint32_t n=512u-skip;if(n>len)n=len;
+        FfsPatch *block;
+        if(skip) {
+            uint32_t disk;
+            if(ifs_ffs_data_block(&s.v,e,logical,&disk)!=0) {rc=IFS_FS_CORRUPT;goto done;}
+            rc=grow_allocated(&t,disk);if(rc!=IFS_FS_OK)goto done;
+            rc=grow_patch(&t,disk,&block);if(rc!=IFS_FS_OK)goto done;
+        } else {
+            uint32_t slot=logical%72u;
+            if(logical && !slot) {
+                FfsPatch *next;rc=grow_alloc(&t,&next);if(rc!=IFS_FS_OK)goto done;
+                grow_word(next->now,0,16u);grow_word(next->now,1,next->number);
+                grow_word(next->now,125,e->block);grow_word(next->now,127,(uint32_t)-3);
+                grow_checksum(next->now,5);
+                grow_word(page->now,126,next->number);grow_checksum(page->now,5);
+                page->dirty=1;page=next;
+            }
+            rc=grow_alloc(&t,&block);if(rc!=IFS_FS_OK)goto done;
+            grow_word(page->now,77u-slot,block->number);
+            grow_word(page->now,2,slot+1u);
+            if(!logical)grow_word(header->now,4,block->number);
+            grow_checksum(page->now,5);page->dirty=1;
+        }
+        memcpy(block->now+skip,src,n);block->dirty=1;
+        pos+=n;src+=n;len-=n;
+    }
+    grow_word(header->now,81,(uint32_t)pos);grow_checksum(header->now,5);
+    header->dirty=1;rc=grow_commit(&t);
+done:
+    grow_release(&t);return rc;
+}
+
 static int write_file(void *volume,const char *path,uint64_t offset,
                       const void *data,uint32_t len){
     IfsFfsDropInEntry e={0};const char *name;uint32_t n;
@@ -457,6 +728,8 @@ static int write_file(void *volume,const char *path,uint64_t offset,
     int r=path_entry(path,&e,&name,&n);
     if(r)return r;
     if(e.type!=IFS_FFS_FILE)return IFS_FS_INVALID;
+    if(s.write_fault)return IFS_FS_IO_ERROR;
+    if(offset==e.size && len)return grow_append(volume,&e,offset,data,len);
     if(offset>e.size||len>e.size-offset)return IFS_FS_UNSUPPORTED;
     IfsFfsWritableIo io={0};
     io.read=s.v.io;io.write_at=v2_write;io.flush=v2_flush;
@@ -575,12 +848,12 @@ static const IfsFsCoreOpsV2 core={
              #if defined(IFS_FFS_FIRMWARE_BUILD)
              IFS_FS_CORE_LIST|IFS_FS_CORE_READ},
 #else
-             IFS_FS_CORE_LIST|IFS_FS_CORE_READ|IFS_FS_CORE_WRITE},
+             IFS_FS_CORE_LIST|IFS_FS_CORE_READ|IFS_FS_CORE_WRITE|IFS_FS_CORE_CREATE},
 #endif
     .probe=guarded_probe,.mount=guarded_mount,.unmount=guarded_unmount,
     .stat=guarded_stat_path,.directory_entry=guarded_nth,.read=guarded_read_file
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-    ,.write=guarded_write_file
+    ,.write=guarded_write_file,.create=guarded_grow_create
 #endif
 };
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
@@ -622,7 +895,7 @@ static int format_dos1(const IfsFsHostRuntimeV2 *h,uint32_t variant,
        !(h->capabilities&IFS_FS_HOST_EXCLUSIVE) ||
        !(h->capabilities&IFS_FS_HOST_DURABLE))return IFS_FS_ACCESS;
     if(s.mounted)return IFS_FS_BUSY;
-    if(variant!=1u || flags || h->logical_sector_bytes!=FORMAT_BLOCK ||
+    if((variant!=0u && variant!=1u) || flags || h->logical_sector_bytes!=FORMAT_BLOCK ||
        h->volume_bytes%FORMAT_BLOCK)return IFS_FS_UNSUPPORTED;
     const uint64_t count=h->volume_bytes/FORMAT_BLOCK;
     /* Bound initial qualification to 512-byte DOS1 media up to 2 GiB.

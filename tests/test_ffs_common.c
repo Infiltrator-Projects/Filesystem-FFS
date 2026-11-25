@@ -47,7 +47,7 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     },ro=h;
     ro.capabilities=IFS_FS_HOST_READ_ONLY;ro.write_at=NULL;ro.flush=NULL;
     CHECK(vol->format(&ro,1u,"TEST",0u)==IFS_FS_ACCESS);
-    CHECK(vol->format(&h,0u,"TEST",0u)==IFS_FS_UNSUPPORTED);
+    CHECK(vol->format(&h,3u,"TEST",0u)==IFS_FS_UNSUPPORTED);
     CHECK(vol->format(&h,1u,"Bad:name",0u)==IFS_FS_INVALID);
     CHECK(!media.writes && !media.flushes);
     CHECK(vol->format(&h,1u,"TEST",0u)==IFS_FS_OK && media.flushes>=3u);
@@ -117,6 +117,30 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->directory_entry(session,"/",0u,&entry)==IFS_FS_END);
     CHECK(vol->format(&h,1u,"TEST",0u)==IFS_FS_BUSY);
     CHECK(core->unmount(session)==IFS_FS_OK);
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_OK);
+    CHECK(core->create(session,"/A.BIN",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
+    CHECK(core->create(session,"/B.BIN",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
+    CHECK(core->create(session,"/a.bin",IFS_FS_ENTRY_FILE)==IFS_FS_EXISTS);
+    uint8_t a[65536],b[65536],copy[65536];
+    memset(a,0x35,sizeof(a));memset(b,0x78,sizeof(b));
+    for(unsigned i=0;i<4u;++i) {
+        CHECK(core->write(session,"/A.BIN",(uint64_t)i*sizeof(a),a,sizeof(a))==IFS_FS_OK);
+        CHECK(core->write(session,"/B.BIN",(uint64_t)i*sizeof(b),b,sizeof(b))==IFS_FS_OK);
+    }
+    CHECK(core->unmount(session)==IFS_FS_OK);
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK);
+    CHECK(core->stat(session,"/A.BIN",&entry)==IFS_FS_OK && entry.size_bytes==4u*sizeof(a));
+    for(unsigned i=0;i<4u;++i) {
+        CHECK(core->read(session,"/A.BIN",(uint64_t)i*sizeof(a),copy,sizeof(copy))==IFS_FS_OK);
+        CHECK(!memcmp(a,copy,sizeof(a)));
+        CHECK(core->read(session,"/B.BIN",(uint64_t)i*sizeof(b),copy,sizeof(copy))==IFS_FS_OK);
+        CHECK(!memcmp(b,copy,sizeof(b)));
+    }
+    const IfsFsDefragOpsV2 *map=(const void*)ifs_fs_group_v2(infiltrator_filesystem_api_v2(),IFS_FS_GROUP_DEFRAG);
+    IfsFsExtentV2 ex[2];uint32_t written=0;
+    CHECK(map->map(session,"/A.BIN",127u,ex,2,&written)==IFS_FS_OK && written==2u);
+    CHECK(ex[1].physical_offset!=ex[0].physical_offset+ex[0].length);
+    CHECK(core->unmount(session)==IFS_FS_OK);
     result=0;
 done:
     free(media.bytes);return result;
@@ -133,7 +157,7 @@ int main(void)
     defrag=(const IfsFsDefragOpsV2 *)ifs_fs_group_v2(api,IFS_FS_GROUP_DEFRAG);
     if(!core || !core->probe || !core->mount || !core->unmount ||
        !core->stat || !core->directory_entry || !core->read || !core->write ||
-       core->create || core->remove || core->truncate ||
+       !core->create || core->remove || core->truncate ||
        !volume || !volume->query || !volume->sync ||
        !volume->format || volume->repair ||
        !defrag || defrag->header.capabilities!=IFS_FS_DEFRAG_MAP ||
