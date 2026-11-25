@@ -1,59 +1,36 @@
 # Filesystem-FFS
 
+## 1. Purpose and format scope
 
-**Source ownership and release boundary:** This repository owns only the Amiga FFS filesystem engine and its single distributable `FFS.so`. Common support code is compiled into that module where required, never published as an additional filesystem driver. CI rejects foreign format source directories, provider submodules, extra shared-object installation targets, and unexpected package payloads. The release manual is generated from `docs/FFS.pages`; the checked-in PDF and preview files are reference copies, not separate installed manuals.
-Canonical independent AmigaDOS Fast File System driver for InfiltratorOS. FFS is
-distinct from OFS (Original File System); neither driver's on-disk algorithms
-belong inside Defragmenter.
+Amiga Fast File System (DOS1/DOS3/DOS5 mutation subset), distinct from OFS. This repository owns the format-specific implementation of `FFS.so` for InfiltratorOS.
 
-**One filesystem, one repository, one distributable shared object:** this
-repository produces only `FFS.so` for FFS. "Unified" means the FFS reader,
-writer, defragmenter and test-media interfaces share one FFS-specific binary.
-It does **not** combine FFS with OFS, exFAT or any other format. The older
-`FFS-legacy.so` is an internal regression-test artifact, never an installable
-driver.
+## 2. On-disk architecture and invariants
 
-The **default `make` output is the unified `FFS.so`**, and the CMake
-`ffs-unified` target produces the same module. It exposes the original
-freestanding read and bounded overwrite engine, alongside Common V2
-and the dedicated relocation, recovery and Test Media fixture interfaces. The Linux host provides generic I/O,
-identity/stop controls and journal services over typed ABIs. No application
-fallback to private FFS filesystem source is permitted.
+FFS stores raw payload blocks without the OFS 24-byte data header. The root, hashed directories, file headers, allocation bitmap and extension chains define ownership and block mapping. Native file growth allocates bitmap entries and links extension headers when the initial pointer table is exhausted.
 
-- `native/filesystems/ffs/core/` and `native/filesystems/ffs/module/` own
-  the independent freestanding read API and limited overwrite logic
-- `native/defrag/` owns the scanner, FFS allocation planner, relayout,
-  journalling and recovery implementation migrated from Defragmenter
-- `native/fixtures/` owns disposable-image formatting, fragmented file
-  population, and payload verification
-- `module/` contains the independently callable defragmentation and
-  Test Media interfaces
-- `tests/` validates the reader and a disposable fragmented FFS image
+## 3. Common V2 implementation and capabilities
 
-Run `make test` to qualify both the legacy **FFS-legacy.so** ABI and the
-unified **FFS.so** formatter, payload, and API exports. The Makefile keeps
-the legacy test artifact separate; it must not overwrite the distributable
-driver.
+Common V2 declares probe, mount, stat, enumeration, read, write, create and DOS1 format. Native file header creation, bitmap allocation and interleaved extension-chain growth are implemented. Extent mapping and volume query are distinct from relocation. The historical test-media and relocation engine remain in source. The canonical entry point is `infiltrator_filesystem_api_v2`. Consumers must negotiate the actual profile and operation masks and use bounded, partition-relative host I/O. A source-level callback does not by itself establish that every format variant or host profile is qualified.
 
-This project does **not** claim universal EFI/BOOT/kernel loading, fully
-qualified boot-device modification, or unlimited AmigaDOS variants.
-Only the tested native DOS1/DOS3/DOS5 subset is supported by the current
-mutation path. Do not apply OFS data-header logic to FFS raw data blocks.
+## 4. Integrity, mutation, allocation and recovery
 
-## Installer files
+Writes require exclusive durable host access. Do not infer DOS7 or universal directory-cache mutation, complete power-loss safety, or kernel/firmware acceptance from source tests. Keep legacy test artifacts out of production. For destructive operations, require the applicable exclusive writable host, durability contract and format-specific validation. Never silently substitute a kernel or FUSE driver or treat a rejected or unavailable operation as success. Preserve original disk-format semantics; relocation and recovery are separate from ordinary file I/O.
 
-- `/System/Filesystems/FFS.so`
-- `/System/Resources/Documentation/Filesystem-FFS.pdf`
-- `/System/Kernel/Filesystems/ffs.ko`
+## 5. Build, installation and release
 
-The published Debian package installs these three regular files. A manual native RUN compiles the shared object and Linux adapter locally, generates the PDF, and replaces all three files. It uses the running kernel headers by default. Use `--kernel-build DIRECTORY` for a prepared kernel build with `Module.symvers`. The kernel module is stored for manual use.
+The target installation is `/System/Filesystems/FFS.so` and `/System/Resources/Documentation/Filesystem-FFS.pdf`. The project release policy is a portable amd64 DEB and a CPU-native source-first RUN, with GitHub's automatic source archive; do not treat this policy statement as verification of the current installer payload. The release workflow is the authoritative executable build and package specification. Historical adapters and test artifacts are not additional production filesystem authorities.
 
-InfiltratorOS calls `--system-package-mode` and decides which outputs need updating. Its worker builds a missing or older SO, repairs the PDF independently, and stores the matching released kernel module when available. Use `--build-only --output DIRECTORY` to build a Debian package.
+## 6. Qualification and limitations
 
-## Common V2 filesystem ABI
+[Recorded qualification workflow](https://github.com/Infiltrator-Projects/Filesystem-FFS/actions/runs/45534284195) · [Current workflows](https://github.com/Infiltrator-Projects/Filesystem-FFS/actions?query=branch%3Amain). A successful workflow establishes the tested scope only, not complete original-format parity, physical-media crash safety, or production BOOT/kernel integration. Use disposable images for destructive qualification.
 
-`FFS.so` exposes `infiltrator_filesystem_api_v2` for probe, mount, directory
-and file reads, bounded existing-file overwrite, volume query and read-only
-file extent mapping. Directory names are converted between native Latin-1
-and Common UTF-8. Creating files, formatting and transactional relocation
-and recovery require further Common V2 work.
+## 7. Technical references and provenance
+
+- [Provider implementation](module/ffs_common.c)
+- [Native design or source provenance](native/filesystems/ffs/FFS_SPECIFICATION.md)
+- [Migration and source history](docs/DEFRAg_MIGRATION.md)
+- [Original-format reference source](docs/FFS.pages) and [PDF](docs/FFS.pdf)
+- [Project philosophy](docs/PHILOSOPHY.md)
+- [Common ABI](https://github.com/Infiltrator-Projects/Libraries)
+
+The original-format reference and historical migration notes describe different evidence from the current production provider. When descriptions disagree, the current exported descriptor, implementation, executable tests and exact-revision release evidence take precedence.
