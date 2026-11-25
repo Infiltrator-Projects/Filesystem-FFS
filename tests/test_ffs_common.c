@@ -90,6 +90,7 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     const uint8_t *r=media.bytes+(uint64_t)root*512u;
     CHECK(r[432]==4u && !memcmp(r+433,"TEST",4u));
     uint32_t total_maps=(blocks-2u+4063u)/4064u;
+    uint8_t *root_map=NULL;uint32_t root_bit=0u;
     uint32_t extension=word(r,104u),extension_slot=0u;
     for(uint32_t i=0u;i<total_maps;++i) {
         uint32_t ptr;
@@ -107,6 +108,7 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
         CHECK(!sum);
         if(root>=2u+i*4064u && root<2u+(i+1u)*4064u) {
             const uint32_t bit=root-2u-i*4064u;
+            root_map=media.bytes+(uint64_t)ptr*512u;root_bit=bit;
             CHECK(!(word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u))));
         }
     }
@@ -147,6 +149,25 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
         ==IFS_FS_CORRUPT && !bad_count);
     first_map[0]^=1u;
     CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
+    /* Keep the bitmap checksum valid while claiming its own root is free.
+     * A plausible free count is insufficient proof of a safe allocation map. */
+    CHECK(root_map!=NULL);
+    const uint32_t slot=1u+root_bit/32u,mask=UINT32_C(1)<<(root_bit%32u);
+    const uint32_t original_word=word(root_map,slot),original_sum=word(root_map,0u);
+    CHECK(!(original_word&mask));
+    const uint32_t altered_word=original_word|mask,altered_sum=original_sum-mask;
+    for(unsigned j=0u;j<4u;++j) {
+        root_map[4u*slot+j]=(uint8_t)(altered_word>>(24u-8u*j));
+        root_map[j]=(uint8_t)(altered_sum>>(24u-8u*j));
+    }
+    bad_count=99u;
+    CHECK(allocation->map(session,0u,&bad_range,1u,&bad_count)==IFS_FS_CORRUPT
+          && !bad_count);
+    for(unsigned j=0u;j<4u;++j) {
+        root_map[4u*slot+j]=(uint8_t)(original_word>>(24u-8u*j));
+        root_map[j]=(uint8_t)(original_sum>>(24u-8u*j));
+    }
+    CHECK(!allocation_test(session,media.size,expected));
     CHECK(core->stat(session,"/",&entry)==IFS_FS_OK && entry.type==IFS_FS_ENTRY_DIRECTORY);
     CHECK(core->directory_entry(session,"/",0u,&entry)==IFS_FS_END);
     CHECK(vol->format(&h,1u,"TEST",0u)==IFS_FS_BUSY);
