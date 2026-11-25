@@ -29,8 +29,10 @@ The target installation is `/System/Filesystems/FFS.so` and `/System/Resources/D
 - [Provider implementation](module/ffs_common.c)
 - [Native design or source provenance](native/filesystems/ffs/FFS_SPECIFICATION.md)
 - [Migration and source history](docs/DEFRAg_MIGRATION.md)
-- [Original-format reference source](docs/FFS.pages) and [PDF](docs/FFS.pdf)
+- [Plain-text PDF drawing source (not Apple Pages)](docs/FFS.pages) and [PDF](docs/FFS.pdf)
 - [Project philosophy](docs/PHILOSOPHY.md)
 - [Common ABI](https://github.com/Infiltrator-Projects/Libraries)
 
 The original-format reference and historical migration notes describe different evidence from the current production provider. When descriptions disagree, the current exported descriptor, implementation, executable tests and exact-revision release evidence take precedence.
+
+The canonical specification and installed manual include the historical release chronology, DOS0-DOS7 distinctions, RDB/Kickstart boot history, validation and repair tools, TD64/NSD and large-media boundaries, directory-cache limitations, LNFS and independent source references. Historical handler support is not a claim of current provider parity.
