@@ -271,7 +271,11 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     /* The namespace remains readable even when its allocation map is
      * dirty or missing. A subsequent explicit volume query reports the
      * allocation error; mount itself keeps the conservative zero value. */
-    (void)measured_free_bytes(&info->free_bytes);
+    r=measured_free_bytes(&info->free_bytes);
+    if(r!=IFS_FS_OK && r!=IFS_FS_CORRUPT && r!=IFS_FS_UNSUPPORTED) {
+        s.v.mounted=0u;s.mounted=0;s.handle=0;
+        return r;
+    }
     *volume=(void *)s.handle;
     return IFS_FS_OK;
 }

@@ -19,6 +19,7 @@ static int wr(void *ctx,uint64_t at,const void *in,uint32_t n)
     if(at%512u || n%512u || n>4096u || at>m->size || n>m->size-at)return -1;
     memcpy(m->bytes+at,in,n);++m->writes;return 0;
 }
+static int cancelled(void *ctx){(void)ctx;return 1;}
 static int flush(void *ctx){++((Media*)ctx)->flushes;return 0;}
 static void *alloc(void *ctx,size_t n){(void)ctx;return malloc(n);}
 static void rel(void *ctx,void *p){(void)ctx;free(p);}
@@ -89,6 +90,9 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     IfsFsEntryV2 entry={.structure_bytes=sizeof(entry),.name=name,
                         .name_capacity=sizeof(name)};
     CHECK(core->probe(&ro,&variant)==IFS_FS_OK && variant==1u);
+    ro.capabilities|=IFS_FS_HOST_CANCEL;ro.cancelled=cancelled;
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_BUSY && !session);
+    ro.capabilities&=~IFS_FS_HOST_CANCEL;ro.cancelled=NULL;
     CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
     CHECK(info.variant==1u && info.total_bytes==media.size);
     char label[64],small[2]={'X','X'};
