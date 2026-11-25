@@ -135,7 +135,7 @@ BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS.so and OFS.so are dist
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (interchangeably is unsafe, even where they share metadata code and AmigaDOS namespace) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (concepts. Any defragmentation or repair algorithm must preserve mode-specific allocation) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (and file-header relationships.) Tj ET
-BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (Our published .so and optional .ko are implementation products. Kernel AFFS documentation) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (Our published Common V2 .so is an implementation product. Kernel AFFS documentation) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (and Amiga developer references remain the authorities on actual DOS1/3/5 variants, not the) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (appearance of a generic PDF diagram.) Tj ET
 %%Page
@@ -157,7 +157,7 @@ BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 535.0 Tm (2. Amiga Developer filesys
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 505.0 Tm (https://wiki.amigaos.net/wiki/DCFS_and_LNFS_Low_Level_Data_Structures) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 475.0 Tm (3. ADFlib Amiga disk format technical reference) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 445.0 Tm (https://adflib.github.io/FAQ/adf_info.html) Tj ET
-BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 415.0 Tm (Our independent .so, optional .ko, build procedures and test evidence describe a separate) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 415.0 Tm (Our Common V2 .so, build procedures and test evidence describe a separate) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 398.0 Tm (implementation. The source-level history in this PDF cannot itself qualify production) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 381.0 Tm (writes, boot, recovery or cross-platform compatibility.) Tj ET
 %%Page

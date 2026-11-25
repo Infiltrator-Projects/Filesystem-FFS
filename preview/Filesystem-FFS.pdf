@@ -1,5 +1,4 @@
 %PDF-1.4
-%‚„œ”
 1 0 obj
 << /Type /Catalog /Pages 2 0 R >>
 endobj
@@ -186,7 +185,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 19 0 R >>
 endobj
 19 0 obj
-<< /Length 1505 >>
+<< /Length 1499 >>
 stream
 0.05 0.13 0.22 rg 0 749 595 93 re f
 0.04 0.54 0.60 rg 50 747 115 4 re f
@@ -200,7 +199,7 @@ BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 676.0 Tm (FFS.so and OFS.so are dist
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 659.0 Tm (interchangeably is unsafe, even where they share metadata code and AmigaDOS namespace) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 642.0 Tm (concepts. Any defragmentation or repair algorithm must preserve mode-specific allocation) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 625.0 Tm (and file-header relationships.) Tj ET
-BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (Our published .so and optional .ko are implementation products. Kernel AFFS documentation) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 595.0 Tm (Our published Common V2 .so is an implementation product. Kernel AFFS documentation) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 578.0 Tm (and Amiga developer references remain the authorities on actual DOS1/3/5 variants, not the) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 561.0 Tm (appearance of a generic PDF diagram.) Tj ET
 endstream
@@ -209,7 +208,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 21 0 R >>
 endobj
 21 0 obj
-<< /Length 2200 >>
+<< /Length 2184 >>
 stream
 0.05 0.13 0.22 rg 0 749 595 93 re f
 0.04 0.54 0.60 rg 50 747 115 4 re f
@@ -229,7 +228,7 @@ BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 535.0 Tm (2. Amiga Developer filesys
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 505.0 Tm (https://wiki.amigaos.net/wiki/DCFS_and_LNFS_Low_Level_Data_Structures) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 475.0 Tm (3. ADFlib Amiga disk format technical reference) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 445.0 Tm (https://adflib.github.io/FAQ/adf_info.html) Tj ET
-BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 415.0 Tm (Our independent .so, optional .ko, build procedures and test evidence describe a separate) Tj ET
+BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 415.0 Tm (Our Common V2 .so, build procedures and test evidence describe a separate) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 398.0 Tm (implementation. The source-level history in this PDF cannot itself qualify production) Tj ET
 BT /F1 10.2 Tf 0.07 0.16 0.23 rg 1 0 0 1 50 381.0 Tm (writes, boot, recovery or cross-platform compatibility.) Tj ET
 endstream
@@ -379,37 +378,37 @@ endobj
 xref
 0 30
 0000000000 65535 f 
-0000000015 00000 n 
-0000000064 00000 n 
-0000000198 00000 n 
-0000000268 00000 n 
-0000000343 00000 n 
-0000000411 00000 n 
-0000000557 00000 n 
-0000003329 00000 n 
-0000003475 00000 n 
-0000005453 00000 n 
-0000005601 00000 n 
-0000007595 00000 n 
-0000007743 00000 n 
-0000009606 00000 n 
-0000009754 00000 n 
-0000011622 00000 n 
-0000011770 00000 n 
-0000013503 00000 n 
-0000013651 00000 n 
-0000015208 00000 n 
-0000015356 00000 n 
-0000017608 00000 n 
-0000017756 00000 n 
-0000020517 00000 n 
-0000020665 00000 n 
-0000023379 00000 n 
-0000023527 00000 n 
-0000026387 00000 n 
-0000026535 00000 n 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000192 00000 n 
+0000000262 00000 n 
+0000000337 00000 n 
+0000000405 00000 n 
+0000000551 00000 n 
+0000003323 00000 n 
+0000003469 00000 n 
+0000005447 00000 n 
+0000005595 00000 n 
+0000007589 00000 n 
+0000007737 00000 n 
+0000009600 00000 n 
+0000009748 00000 n 
+0000011616 00000 n 
+0000011764 00000 n 
+0000013497 00000 n 
+0000013645 00000 n 
+0000015196 00000 n 
+0000015344 00000 n 
+0000017580 00000 n 
+0000017728 00000 n 
+0000020489 00000 n 
+0000020637 00000 n 
+0000023351 00000 n 
+0000023499 00000 n 
+0000026359 00000 n 
+0000026507 00000 n 
 trailer
 << /Size 30 /Root 1 0 R >>
 startxref
-30310
+30282
 %%EOF
