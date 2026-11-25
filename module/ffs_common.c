@@ -178,7 +178,9 @@ static int bitmap_remember(uint32_t *set,size_t capacity,uint32_t number)
     set[i]=number;
     return IFS_FS_OK;
 }
-static int measured_free_bytes(uint64_t *out)
+/* Collect the same validated bitmap keys used for free-space accounting.
+ * Optional keys are caller-owned and valid only on successful completion. */
+static int scan_free_bytes(uint64_t *out,uint32_t *keys)
 {
     *out=0u;
     const uint32_t bs=s.v.io.block_bytes,words=bs/4u;
@@ -220,6 +222,7 @@ static int measured_free_bytes(uint64_t *out)
         const uint32_t number=bitmap_word(ptrs,slot++);
         if(number<2u || number>=s.v.blocks) {rc=IFS_FS_CORRUPT;goto done;}
         rc=bitmap_remember(seen,capacity,number);if(rc!=IFS_FS_OK)goto done;
+        if(keys)keys[i]=number;
         rc=bitmap_read(number,map);if(rc!=IFS_FS_OK)goto done;
         if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
         const uint64_t start=(uint64_t)i*bits;
@@ -234,6 +237,25 @@ static int measured_free_bytes(uint64_t *out)
         }
     }
     if(next){rc=IFS_FS_CORRUPT;goto done;}
+    /* A checksum-correct map can still falsely mark its own root or
+     * bitmap/extension blocks free. Reject that before publishing a map. */
+    if(keys) {
+        uint32_t loaded=UINT32_MAX;
+        for(size_t i=0;i<capacity;++i) {
+            if(!seen[i])continue;
+            const uint32_t rel=seen[i]-2u,index=rel/bits,bit=rel%bits;
+            if(index>=maps){rc=IFS_FS_CORRUPT;goto done;}
+            if(index!=loaded) {
+                rc=bitmap_read(keys[index],map);
+                if(rc!=IFS_FS_OK)goto done;
+                if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
+                loaded=index;
+            }
+            if(bitmap_word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u))) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+        }
+    }
     *out=free_blocks*bs;
     rc=IFS_FS_OK;
 done:
@@ -241,6 +263,95 @@ done:
     s.io.release(s.io.context,buf);
     return rc;
 }
+
+static int measured_free_bytes(uint64_t *out)
+{
+    return scan_free_bytes(out,NULL);
+}
+
+/* Whole-volume allocation comes from the source-owned AFFS bitmap, not
+ * a list of regular-file extents. Verify all bitmap pages and their own
+ * metadata ownership before exposing any range, even on a short page.
+ * The map's physical cursor may begin inside a filesystem block. */
+static int allocation_map(void *volume,uint64_t first,
+                          IfsFsAllocationRangeV2 *out,uint32_t capacity,
+                          uint32_t *written)
+{
+    if(!written)return IFS_FS_INVALID;
+    *written=0u;
+    if(!live(volume)||!out||!capacity||capacity>64u)return IFS_FS_INVALID;
+    const uint64_t limit=s.io.volume_bytes;
+    if(first>limit)return IFS_FS_INVALID;
+    if(s.write_fault)return IFS_FS_CORRUPT;
+    const uint32_t bs=s.v.io.block_bytes,words=bs/4u,bits=(words-1u)*32u;
+    const uint64_t span=(uint64_t)s.v.blocks-2u;
+    const uint32_t maps=(uint32_t)((span+bits-1u)/bits);
+    if(!maps || (uint64_t)maps*sizeof(uint32_t)>SIZE_MAX)return IFS_FS_CORRUPT;
+    uint32_t *keys=s.io.allocate(s.io.context,(size_t)maps*sizeof(*keys));
+    if(!keys)return IFS_FS_NO_MEMORY;
+    uint8_t *map=s.io.allocate(s.io.context,bs);
+    if(!map){s.io.release(s.io.context,keys);return IFS_FS_NO_MEMORY;}
+    uint64_t free_bytes=0u;
+    int rc=scan_free_bytes(&free_bytes,keys);
+    IfsFsAllocationRangeV2 page[64]={{0}};
+    uint32_t count=0u,loaded=UINT32_MAX,scanned=0u;
+    uint64_t at=first;
+    if(rc!=IFS_FS_OK)goto done;
+    if(first==limit){rc=IFS_FS_END;goto done;}
+    while(at<limit && scanned<65536u) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context)) {
+            rc=IFS_FS_BUSY;goto done;
+        }
+        const uint64_t block=at/bs;
+        uint64_t end;
+        uint32_t state;
+        if(block<2u) {
+            state=IFS_FS_SPACE_RESERVED;end=2u*(uint64_t)bs;
+        } else if(block>=s.v.blocks) {
+            state=IFS_FS_SPACE_RESERVED;end=limit;
+        } else {
+            const uint32_t rel=(uint32_t)block-2u,index=rel/bits,bit=rel%bits;
+            if(index>=maps){rc=IFS_FS_CORRUPT;goto done;}
+            if(index!=loaded) {
+                rc=bitmap_read(keys[index],map);
+                if(rc!=IFS_FS_OK)goto done;
+                if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
+                loaded=index;
+            }
+            state=(bitmap_word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u)))?
+                IFS_FS_SPACE_FREE:IFS_FS_SPACE_ALLOCATED;
+            end=(block+1u)*bs;
+        }
+        if(end>limit)end=limit;
+        if(count && page[count-1u].state==state)page[count-1u].length+=end-at;
+        else {
+            if(count==capacity)break;
+            page[count++]=(IfsFsAllocationRangeV2){
+                .physical_offset=at,.length=end-at,.state=state};
+        }
+        at=end;++scanned;
+    }
+    memcpy(out,page,count*sizeof(*page));
+    *written=count;
+    rc=IFS_FS_OK;
+done:
+    s.io.release(s.io.context,map);
+    s.io.release(s.io.context,keys);
+    return rc;
+}
+static int guarded_allocation_map(void *volume,uint64_t first,
+                          IfsFsAllocationRangeV2 *out,uint32_t capacity,
+                          uint32_t *written)
+{
+    if(written)*written=0u;
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(allocation_map(volume,first,out,capacity,written));
+}
+static const IfsFsAllocationOpsV2 allocation_ops={
+    .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsAllocationOpsV2),
+             IFS_FS_GROUP_ALLOCATION,0u,IFS_FS_ALLOCATION_MAP},
+    .map=guarded_allocation_map
+};
 
 static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
                  IfsFsVolumeInfoV2 *info){
@@ -1043,6 +1154,7 @@ static const IfsFsGroupHeaderV2 *query_group(uint32_t id,
     if(id==IFS_FS_GROUP_CORE)return &core.header;
     if(id==IFS_FS_GROUP_VOLUME)return &volume_ops.header;
     if(id==IFS_FS_GROUP_DEFRAG)return &defrag_map_ops.header;
+    if(id==IFS_FS_GROUP_ALLOCATION)return &allocation_ops.header;
     return NULL;
 }
 __attribute__((used,section(".ifsmeta")))
@@ -1056,7 +1168,8 @@ static const IfsFsModuleApiV2 api={
 #endif
     IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
         IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|
-        IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG),query_group
+        IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG)|
+        IFS_FS_GROUP_BIT(IFS_FS_GROUP_ALLOCATION),query_group
 };
 __attribute__((visibility("default")))
 const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void)

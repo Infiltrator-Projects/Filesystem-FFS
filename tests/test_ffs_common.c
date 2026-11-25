@@ -30,6 +30,33 @@ static uint32_t word(const uint8_t *p,unsigned n)
            ((uint32_t)p[2]<<8)|p[3];
 }
 #define CHECK(x) do {if(!(x)){fprintf(stderr,"FFS format line %d: %s\n",__LINE__,#x);goto done;}}while(0)
+/* Validate complete allocation paging independently against the
+ * formatter's measured free count and physical volume size. */
+static int allocation_test(void *session,uint64_t size,uint64_t free_expected)
+{
+    const IfsFsAllocationOpsV2 *ops=(const void*)
+        ifs_fs_group_v2(infiltrator_filesystem_api_v2(),IFS_FS_GROUP_ALLOCATION);
+    if(!ops || !ops->map)return 1;
+    uint64_t at=0u,unknown=0u,free_bytes=0u,reserved=0u,allocated=0u;
+    for(;;) {
+        IfsFsAllocationRangeV2 page[3]={{0}};
+        uint64_t next=at;
+        uint32_t n=99u;
+        int rc=ops->map(session,at,page,3u,&n);
+        if(!ifs_fs_allocation_page_v2_valid(size,at,rc,page,3u,n,&next,&unknown))
+            return 1;
+        if(rc==IFS_FS_END)break;
+        for(uint32_t i=0u;i<n;++i) {
+            if(page[i].state==IFS_FS_SPACE_FREE)free_bytes+=page[i].length;
+            if(page[i].state==IFS_FS_SPACE_RESERVED)reserved+=page[i].length;
+            if(page[i].state==IFS_FS_SPACE_ALLOCATED)allocated+=page[i].length;
+        }
+        if(next<=at)return 1;
+        at=next;
+    }
+    return at!=size || unknown || reserved!=1024u || !allocated ||
+        free_bytes!=free_expected || free_bytes+reserved+allocated!=size;
+}
 static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
                        uint32_t blocks)
 {
@@ -107,10 +134,17 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(info.free_bytes==expected);
     info.free_bytes=0u;
     CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
+    CHECK(!allocation_test(session,media.size,expected));
     /* A damaged bitmap checksum cannot become a plausible free count. */
     uint8_t *first_map=media.bytes+(uint64_t)word(r,79u)*512u;
     first_map[0]^=1u;
     CHECK(vol->query(session,&info)==IFS_FS_CORRUPT && info.free_bytes==0u);
+    const IfsFsAllocationOpsV2 *allocation=(const void*)
+        ifs_fs_group_v2(infiltrator_filesystem_api_v2(),IFS_FS_GROUP_ALLOCATION);
+    IfsFsAllocationRangeV2 bad_range={0};
+    uint32_t bad_count=99u;
+    CHECK(allocation && allocation->map(session,0u,&bad_range,1u,&bad_count)
+        ==IFS_FS_CORRUPT && !bad_count);
     first_map[0]^=1u;
     CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
     CHECK(core->stat(session,"/",&entry)==IFS_FS_OK && entry.type==IFS_FS_ENTRY_DIRECTORY);
@@ -140,6 +174,7 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     IfsFsExtentV2 ex[2];uint32_t written=0;
     CHECK(map->map(session,"/A.BIN",127u,ex,2,&written)==IFS_FS_OK && written==2u);
     CHECK(ex[1].physical_offset!=ex[0].physical_offset+ex[0].length);
+    CHECK(!allocation_test(session,media.size,info.free_bytes));
     CHECK(core->unmount(session)==IFS_FS_OK);
     result=0;
 done:
@@ -166,7 +201,8 @@ int main(void)
        (api->runtime_profiles & IFS_FS_PROFILE_KERNEL) ||
        api->group_mask!=(IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
                         IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|
-                        IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG))) {
+                        IFS_FS_GROUP_BIT(IFS_FS_GROUP_DEFRAG)|
+                        IFS_FS_GROUP_BIT(IFS_FS_GROUP_ALLOCATION))) {
         fputs("FFS Common V2 capability contract invalid\n",stderr);
         return 1;
     }
