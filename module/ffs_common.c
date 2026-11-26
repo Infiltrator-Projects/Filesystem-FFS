@@ -398,13 +398,12 @@ static uint32_t relocation_crc(uint32_t crc,const uint8_t *p,size_t n)
 static int relocation_marker(uint8_t marker[512],int *pending)
 {
     *pending=0;
-    if(s.variant!=1u || s.v.io.block_bytes!=512u ||
-       s.io.logical_sector_bytes!=512u || s.io.physical_sector_bytes!=512u)
+    if(s.variant!=1u || s.v.io.block_bytes!=512u)
         return IFS_FS_UNSUPPORTED;
     uint8_t boot[512];
     int rc=ifs_fs_host_read_bytes_v2(&s.io,0u,boot,sizeof(boot));
     if(rc!=IFS_FS_OK)return rc;
-    if(memcmp(boot,"DOS\001",4u) || bitmap_word(boot,2u)!=s.v.root_block)
+    if(bitmap_word(boot,0u)!=UINT32_C(0x444f5301) || bitmap_word(boot,2u)!=s.v.root_block)
         return IFS_FS_UNSUPPORTED;
     uint32_t sum=0u;
     for(unsigned i=0u;i<128u;++i) {
@@ -418,8 +417,9 @@ static int relocation_marker(uint8_t marker[512],int *pending)
     unsigned nonzero=0u;
     for(unsigned i=0u;i<512u;++i)nonzero|=marker[i];
     if(!nonzero)return IFS_FS_OK;
-    if(memcmp(marker,relocation_magic,sizeof(relocation_magic)) ||
-       bitmap_word(marker,127u)!=relocation_crc(UINT32_MAX,marker,508u))
+    for(unsigned i=0u;i<sizeof(relocation_magic);++i)
+        if(marker[i]!=relocation_magic[i])return IFS_FS_CORRUPT;
+    if(bitmap_word(marker,127u)!=relocation_crc(UINT32_MAX,marker,508u))
         return IFS_FS_CORRUPT;
     *pending=1;
     return IFS_FS_OK;
@@ -464,7 +464,8 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
         s.v.mounted=0u;s.mounted=0;s.handle=0;return r;
     }
     if(pending) {
-        if(h->capabilities&IFS_FS_HOST_READ_ONLY) {
+        if((h->capabilities&IFS_FS_HOST_READ_ONLY) ||
+           h->logical_sector_bytes!=512u || h->physical_sector_bytes!=512u) {
             s.v.mounted=0u;s.mounted=0;s.handle=0;return IFS_FS_BUSY;
         }
         s.recovery_pending=1;info->free_bytes=0u;
@@ -1856,6 +1857,7 @@ static int relocation_execute(void *volume,void *opaque,uint64_t *moved)
     if(!live(volume) || !opaque || opaque!=s.plan || s.plan->executed)
         return IFS_FS_INVALID;
     int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
+    if(s.io.physical_sector_bytes!=512u)return IFS_FS_UNSUPPORTED;
     uint8_t marker[512];int pending=0;
     rc=relocation_marker(marker,&pending);
     if(rc!=IFS_FS_OK || pending)return rc!=IFS_FS_OK?rc:IFS_FS_BUSY;
@@ -1913,6 +1915,8 @@ static int relocation_recover(void *volume,uint32_t flags,uint64_t *repaired)
     if(!repaired)return IFS_FS_INVALID;
     *repaired=0u;
     if(!session_live(volume) || flags)return IFS_FS_INVALID;
+    if(s.io.logical_sector_bytes!=512u || s.io.physical_sector_bytes!=512u)
+        return IFS_FS_UNSUPPORTED;
     if((s.io.capabilities&IFS_FS_HOST_READ_ONLY) ||
        !(s.io.capabilities&IFS_FS_HOST_EXCLUSIVE) ||
        !(s.io.capabilities&IFS_FS_HOST_DURABLE))return IFS_FS_ACCESS;
