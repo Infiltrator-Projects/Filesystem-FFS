@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 extern const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void);
-typedef struct {uint8_t *bytes;uint64_t size;unsigned writes,flushes,fail_flush;} Media;
+typedef struct {uint8_t *bytes,*durable;uint64_t size;unsigned writes,flushes,fail_flush;} Media;
 static int rd(void *ctx,uint64_t at,void *out,uint32_t n)
 {
     Media *m=ctx;
@@ -20,7 +20,13 @@ static int wr(void *ctx,uint64_t at,const void *in,uint32_t n)
     memcpy(m->bytes+at,in,n);++m->writes;return 0;
 }
 static int cancelled(void *ctx){(void)ctx;return 1;}
-static int flush(void *ctx){Media *m=ctx;return ++m->flushes==m->fail_flush?-1:0;}
+static int flush(void *ctx)
+{
+    Media *m=ctx;
+    if(++m->flushes==m->fail_flush)return -1;
+    if(m->durable)memcpy(m->durable,m->bytes,(size_t)m->size);
+    return 0;
+}
 static void *alloc(void *ctx,size_t n){(void)ctx;return malloc(n);}
 static void rel(void *ctx,void *p){(void)ctx;free(p);}
 static uint32_t word(const uint8_t *p,unsigned n)
@@ -360,6 +366,83 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
 done:
     free(media.bytes);return result;
 }
+/* A failed barrier loses every write since the previous successful flush.
+ * Cold-mount the durable image for all five publication boundaries and both
+ * policies. The earlier test separately covers writes surviving a failed flush.
+ */
+static int power_loss_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
+                           const IfsFsDefragOpsV2 *defrag,uint32_t policy,unsigned boundary)
+{
+    Media media={.size=8192u*512u};
+    media.bytes=calloc(1,(size_t)media.size);
+    media.durable=calloc(1,(size_t)media.size);
+    int result=1;
+    void *session=NULL,*plan=NULL;
+    CHECK(media.bytes && media.durable);
+    IfsFsHostRuntimeV2 h={
+        .abi_version=IFS_FS_HOST_ABI_V2,.structure_bytes=sizeof(h),
+        .capabilities=IFS_FS_HOST_EXCLUSIVE|IFS_FS_HOST_DURABLE,
+        .volume_bytes=media.size,.logical_sector_bytes=512u,
+        .physical_sector_bytes=512u,.maximum_transfer_bytes=4096u,
+        .context=&media,.read_at=rd,.write_at=wr,.flush=flush,
+        .allocate=alloc,.release=rel
+    },ro=h;
+    ro.capabilities=IFS_FS_HOST_READ_ONLY;ro.write_at=NULL;ro.flush=NULL;
+    IfsFsVolumeInfoV2 info={.structure_bytes=sizeof(info)};
+    uint8_t a[8192],b[8192],copy[8192];
+    for(size_t i=0;i<sizeof(a);++i){a[i]=(uint8_t)(i*13u+3u);b[i]=(uint8_t)(i*29u+7u);}
+    CHECK(vol->format(&h,1u,"POWERLOSS",0u)==IFS_FS_OK);
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_OK);
+    CHECK(core->create(session,"/A",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
+    CHECK(core->create(session,"/B",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
+    for(unsigned i=0;i<4u;++i){
+        CHECK(core->write(session,"/A",(uint64_t)i*sizeof(a),a,sizeof(a))==IFS_FS_OK);
+        CHECK(core->write(session,"/B",(uint64_t)i*sizeof(b),b,sizeof(b))==IFS_FS_OK);
+    }
+    CHECK(vol->sync(session)==IFS_FS_OK);
+    IfsFsExtentV2 ext[2];uint32_t n=0u;
+    CHECK(defrag->map(session,"/A",15u,ext,2u,&n)==IFS_FS_OK && n==2u);
+    CHECK(ext[1].physical_offset!=ext[0].physical_offset+ext[0].length);
+    CHECK(defrag->plan(session,"/",policy,&plan)==IFS_FS_OK && plan);
+    media.fail_flush=media.flushes+boundary;
+    uint64_t moved=0u;
+    CHECK(defrag->execute(session,plan,&moved)==IFS_FS_IO_ERROR);
+    defrag->release_plan(session,plan);plan=NULL;
+    CHECK(core->unmount(session)==IFS_FS_OK);session=NULL;
+    memcpy(media.bytes,media.durable,(size_t)media.size);
+    media.fail_flush=0u;
+    if(boundary>=4u){
+        CHECK(core->mount(&ro,&session,&info)==IFS_FS_BUSY && !session);
+    } else {
+        CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
+        CHECK(core->unmount(session)==IFS_FS_OK);session=NULL;
+    }
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_OK && session);
+    uint64_t repaired=0u,errors=UINT64_MAX;
+    CHECK(defrag->recover(session,0u,&repaired)==IFS_FS_OK);
+    CHECK((repaired!=0u)==(boundary>=4u));
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    CHECK(defrag->plan(session,"/",policy,&plan)==IFS_FS_OK && plan);
+    CHECK(defrag->execute(session,plan,&moved)==IFS_FS_OK);
+    CHECK(defrag->verify(session,plan)==IFS_FS_OK);
+    defrag->release_plan(session,plan);plan=NULL;
+    CHECK(core->unmount(session)==IFS_FS_OK);session=NULL;
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK);
+    for(unsigned i=0;i<4u;++i){
+        CHECK(core->read(session,"/A",(uint64_t)i*sizeof(a),copy,sizeof(a))==IFS_FS_OK && !memcmp(copy,a,sizeof(a)));
+        CHECK(core->read(session,"/B",(uint64_t)i*sizeof(b),copy,sizeof(b))==IFS_FS_OK && !memcmp(copy,b,sizeof(b)));
+    }
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    CHECK(!allocation_test(session,media.size,info.free_bytes));
+    CHECK(core->unmount(session)==IFS_FS_OK);session=NULL;
+    result=0;
+done:
+    if(plan && session)defrag->release_plan(session,plan);
+    if(session)core->unmount(session);
+    free(media.durable);free(media.bytes);
+    if(result)fprintf(stderr,"FFS power loss: policy %u boundary %u failed\n",policy,boundary);
+    return result;
+}
 int main(void)
 {
     const IfsFsModuleApiV2 *api=infiltrator_filesystem_api_v2();
@@ -387,6 +470,10 @@ int main(void)
         return 1;
     }
     if(format_test(core,volume,8192u) || format_test(core,volume,131072u))return 1;
+    for(unsigned policy=0u;policy<=10u;policy+=10u)
+        for(unsigned boundary=1u;boundary<=5u;++boundary)
+            if(power_loss_test(core,volume,defrag,policy,boundary))return 1;
+    puts("FFS-POWER-LOSS-ALL-FIVE-BARRIERS-BOTH-POLICIES-PASS");
     puts("FFS-DOS1-FORMAT-BOOT-CHECKSUM-BITMAP-EXTENSION-AND-MOUNT-PASS");
     puts("FFS-STRICT-COMMON-V2-CONTRACT-PASS");
     return 0;
