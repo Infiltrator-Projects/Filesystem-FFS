@@ -163,10 +163,18 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     bad_count=99u;
     CHECK(allocation->map(session,0u,&bad_range,1u,&bad_count)==IFS_FS_CORRUPT
           && !bad_count);
+    /* Scalar accounting must reject exactly the same forged metadata bit.
+     * A corrupt bitmap must never be admitted to a writable mount. */
+    CHECK(vol->query(session,&info)==IFS_FS_CORRUPT && !info.free_bytes);
+    CHECK(core->unmount(session)==IFS_FS_OK);
+    session=NULL;
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_CORRUPT && !session);
     for(unsigned j=0u;j<4u;++j) {
         root_map[4u*slot+j]=(uint8_t)(original_word>>(24u-8u*j));
         root_map[j]=(uint8_t)(original_sum>>(24u-8u*j));
     }
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
+    CHECK(vol->query(session,&info)==IFS_FS_OK && info.free_bytes==expected);
     CHECK(!allocation_test(session,media.size,expected));
     CHECK(core->stat(session,"/",&entry)==IFS_FS_OK && entry.type==IFS_FS_ENTRY_DIRECTORY);
     CHECK(core->directory_entry(session,"/",0u,&entry)==IFS_FS_END);

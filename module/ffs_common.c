@@ -178,8 +178,9 @@ static int bitmap_remember(uint32_t *set,size_t capacity,uint32_t number)
     set[i]=number;
     return IFS_FS_OK;
 }
-/* Collect the same validated bitmap keys used for free-space accounting.
- * Optional keys are caller-owned and valid only on successful completion. */
+/* Collect and validate the allocation bitmap keys for every caller.
+ * Keys are caller-owned and valid only on successful completion. Both
+ * volume accounting and allocation paging must reject metadata marked free. */
 static int scan_free_bytes(uint64_t *out,uint32_t *keys)
 {
     *out=0u;
@@ -222,7 +223,7 @@ static int scan_free_bytes(uint64_t *out,uint32_t *keys)
         const uint32_t number=bitmap_word(ptrs,slot++);
         if(number<2u || number>=s.v.blocks) {rc=IFS_FS_CORRUPT;goto done;}
         rc=bitmap_remember(seen,capacity,number);if(rc!=IFS_FS_OK)goto done;
-        if(keys)keys[i]=number;
+        keys[i]=number;
         rc=bitmap_read(number,map);if(rc!=IFS_FS_OK)goto done;
         if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
         const uint64_t start=(uint64_t)i*bits;
@@ -239,7 +240,7 @@ static int scan_free_bytes(uint64_t *out,uint32_t *keys)
     if(next){rc=IFS_FS_CORRUPT;goto done;}
     /* A checksum-correct map can still falsely mark its own root or
      * bitmap/extension blocks free. Reject that before publishing a map. */
-    if(keys) {
+    {
         uint32_t loaded=UINT32_MAX;
         for(size_t i=0;i<capacity;++i) {
             if(!seen[i])continue;
@@ -266,7 +267,19 @@ done:
 
 static int measured_free_bytes(uint64_t *out)
 {
-    return scan_free_bytes(out,NULL);
+    /* The same metadata ownership validation used for allocation pages
+     * is mandatory for the scalar free-space count. A valid checksum alone
+     * cannot prove that the allocator's own metadata remains allocated. */
+    *out=0u;
+    const uint32_t bits=(s.v.io.block_bytes/4u-1u)*32u;
+    const uint64_t span=(uint64_t)s.v.blocks-2u;
+    const uint64_t maps=(span+bits-1u)/bits;
+    if(!maps || maps>SIZE_MAX/sizeof(uint32_t))return IFS_FS_CORRUPT;
+    uint32_t *keys=s.io.allocate(s.io.context,(size_t)maps*sizeof(*keys));
+    if(!keys)return IFS_FS_NO_MEMORY;
+    const int rc=scan_free_bytes(out,keys);
+    s.io.release(s.io.context,keys);
+    return rc;
 }
 
 /* Whole-volume allocation comes from the source-owned AFFS bitmap, not
@@ -383,11 +396,12 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     info->variant=variant;info->max_name_bytes=60u;
     info->block_bytes=s.v.io.block_bytes;
     info->total_bytes=s.v.io.volume_bytes;
-    /* The namespace remains readable even when its allocation map is
-     * dirty or missing. A subsequent explicit volume query reports the
-     * allocation error; mount itself keeps the conservative zero value. */
+    /* Permit forensic namespace reads on a damaged allocation map, but
+     * never grant a writable session whose free-space ownership is invalid.
+     * The explicit VOLUME.QUERY and ALLOCATION.MAP still report the error. */
     r=measured_free_bytes(&info->free_bytes);
-    if(r!=IFS_FS_OK && r!=IFS_FS_CORRUPT && r!=IFS_FS_UNSUPPORTED) {
+    if(r!=IFS_FS_OK && (!(h->capabilities&IFS_FS_HOST_READ_ONLY) ||
+       (r!=IFS_FS_CORRUPT && r!=IFS_FS_UNSUPPORTED))) {
         s.v.mounted=0u;s.mounted=0;s.handle=0;
         return r;
     }
