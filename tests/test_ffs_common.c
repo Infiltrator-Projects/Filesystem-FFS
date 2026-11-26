@@ -323,6 +323,18 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->mount(&h,&session,&info)==IFS_FS_OK && session);
     CHECK(core->stat(session,"/A.BIN",&entry)!=IFS_FS_OK);
     uint64_t repaired=0u;
+    /* Damage a journal record while the durable locator remains present.
+     * Recovery must fail before writing any live metadata, then accept
+     * the independently restored record on a subsequent attempt. */
+    const uint32_t journal=word(media.bytes+512u,2u);
+    CHECK(journal>=2u && journal+1u<blocks);
+    uint8_t *redo=media.bytes+(uint64_t)(journal+1u)*512u;
+    const uint8_t original_redo=redo[101u];
+    redo[101u]^=1u;
+    before=media.writes;
+    CHECK(map->recover(session,0u,&repaired)==IFS_FS_CORRUPT &&
+          !repaired && media.writes==before);
+    redo[101u]=original_redo;
     CHECK(map->recover(session,0u,&repaired)==IFS_FS_OK && repaired);
     CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
     CHECK(map->plan(session,"/",10u,&plan)==IFS_FS_OK && plan);

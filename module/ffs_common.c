@@ -421,6 +421,7 @@ static int relocation_marker(uint8_t marker[512],int *pending)
         if(marker[i]!=relocation_magic[i])return IFS_FS_CORRUPT;
     if(bitmap_word(marker,127u)!=relocation_crc(UINT32_MAX,marker,508u))
         return IFS_FS_CORRUPT;
+    if(s.v.blocks>4194304u || s.v.hash_size!=72u)return IFS_FS_CORRUPT;
     *pending=1;
     return IFS_FS_OK;
 }
@@ -1640,6 +1641,49 @@ static int relocation_read_record(uint32_t start,uint32_t index,
     }
     return IFS_FS_OK;
 }
+/* A private read overlay exposes the proposed post-transaction metadata
+ * to the same native namespace/bitmap integrity checker used by VOLUME.CHECK.
+ * No alternate filesystem parser or physical write is needed for preflight.
+ * The global operation gate excludes every other provider operation while
+ * the original host callback is temporarily wrapped. */
+typedef struct {
+    int (*read_at)(void *,uint64_t,void *,uint32_t);
+    const uint8_t *seen,*images;
+    const uint32_t *targets;
+    uint32_t count;
+} FfsRedoOverlay;
+static FfsRedoOverlay redo_overlay;
+static int redo_overlay_read(void *context,uint64_t offset,void *output,uint32_t bytes)
+{
+    if(!redo_overlay.read_at || offset%512u || bytes%512u)return -1;
+    if(redo_overlay.read_at(context,offset,output,bytes)!=0)return -1;
+    uint8_t *dest=output;
+    for(uint32_t at=0u;at<bytes;at+=512u) {
+        uint64_t block=(offset+at)/512u;
+        if(block>=s.v.blocks)return -1;
+        if(!(redo_overlay.seen[block/8u]&(1u<<(block%8u))))continue;
+        uint32_t index=0u;
+        while(index<redo_overlay.count && redo_overlay.targets[index]!=block)++index;
+        if(index==redo_overlay.count)return -1;
+        memcpy(dest+at,redo_overlay.images+(size_t)index*512u,512u);
+    }
+    return 0;
+}
+static int redo_overlay_check(const uint8_t *seen,const uint8_t *images,
+                              const uint32_t *targets,uint32_t records)
+{
+    redo_overlay=(FfsRedoOverlay){s.io.read_at,seen,images,targets,records};
+    s.io.read_at=redo_overlay_read;
+    const int old_fault=s.write_fault;
+    s.recovery_pending=0;s.write_fault=0;
+    uint64_t errors=0u;
+    int rc=integrity_check((void *)s.handle,0u,&errors);
+    s.io.read_at=redo_overlay.read_at;
+    redo_overlay=(FfsRedoOverlay){0};
+    s.recovery_pending=1;s.write_fault=old_fault;
+    return rc;
+}
+
 /* Validate the entire journal before replaying any sector. Bounds, unique
  * targets, native bitmap geometry and the complete replacement file chain
  * are independently checked; the marker cannot address boot/root blocks,
@@ -1668,7 +1712,14 @@ static int relocation_replay(const uint8_t marker[512],uint64_t *repaired)
     if(actual!=bitmap_word(marker,9u))return IFS_FS_CORRUPT;
     const size_t owner_bytes=((size_t)s.v.blocks+7u)/8u;
     uint8_t *seen=s.io.allocate(s.io.context,owner_bytes);
-    if(!seen)return IFS_FS_NO_MEMORY;
+    uint8_t *images=s.io.allocate(s.io.context,(size_t)records*512u);
+    uint32_t *targets=s.io.allocate(s.io.context,(size_t)records*sizeof(*targets));
+    if(!seen || !images || !targets) {
+        if(seen)s.io.release(s.io.context,seen);
+        if(images)s.io.release(s.io.context,images);
+        if(targets)s.io.release(s.io.context,targets);
+        return IFS_FS_NO_MEMORY;
+    }
     memset(seen,0,owner_bytes);
     uint32_t crc=UINT32_MAX,expected_page=file,logical=0u;
     uint8_t raw[512];
@@ -1683,6 +1734,7 @@ static int relocation_replay(const uint8_t marker[512],uint64_t *repaired)
             rc=IFS_FS_CORRUPT;goto done;
         }
         seen[target/8u]|=(uint8_t)(1u<<(target%8u));
+        targets[i]=target;memcpy(images+(size_t)i*512u,raw,512u);
         if(i<pages) {
             uint32_t count=blocks-logical;if(count>72u)count=72u;
             if(target<=fixed || target!=expected_page ||
@@ -1719,12 +1771,12 @@ static int relocation_replay(const uint8_t marker[512],uint64_t *repaired)
         }
     }
     if(crc!=bitmap_word(marker,8u)){rc=IFS_FS_CORRUPT;goto done;}
+    rc=redo_overlay_check(seen,images,targets,records);
+    if(rc!=IFS_FS_OK)goto done;
     /* After publication cancellation cannot abandon a half-applied
      * transaction. The durable locator survives every I/O failure. */
     for(uint32_t i=0u;i<records;++i) {
-        uint32_t target;
-        rc=relocation_read_record(start,i,&target,raw,NULL);
-        if(rc==IFS_FS_OK)rc=relocation_sector(target,raw);
+        rc=relocation_sector(targets[i],images+(size_t)i*512u);
         if(rc!=IFS_FS_OK)goto done;
     }
     rc=relocation_flush();if(rc!=IFS_FS_OK)goto done;
@@ -1743,6 +1795,8 @@ static int relocation_replay(const uint8_t marker[512],uint64_t *repaired)
         if(repaired)*repaired=records;
     }
 done:
+    s.io.release(s.io.context,targets);
+    s.io.release(s.io.context,images);
     s.io.release(s.io.context,seen);
     return rc;
 }
