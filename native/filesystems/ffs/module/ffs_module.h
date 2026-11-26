@@ -94,4 +94,7 @@ int ifs_ffs_data_block(const IfsFfsDropInVolume *,
                        uint32_t logical_block, uint32_t *physical_block);
 int ifs_ffs_data_blocks(const IfsFfsDropInVolume *, const IfsFfsDropInEntry *,
                         uint32_t first, uint32_t count, uint32_t *physical);
+int ifs_ffs_visit_file_blocks(const IfsFfsDropInVolume *,
+                             const IfsFfsDropInEntry *,
+                             int (*visit)(void *,uint32_t),void *opaque);
 #endif

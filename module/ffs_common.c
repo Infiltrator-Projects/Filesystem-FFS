@@ -181,7 +181,7 @@ static int bitmap_remember(uint32_t *set,size_t capacity,uint32_t number)
 /* Collect and validate the allocation bitmap keys for every caller.
  * Keys are caller-owned and valid only on successful completion. Both
  * volume accounting and allocation paging must reject metadata marked free. */
-static int scan_free_bytes(uint64_t *out,uint32_t *keys)
+static int scan_free_bytes(uint64_t *out,uint32_t *keys,uint8_t *owners)
 {
     *out=0u;
     const uint32_t bs=s.v.io.block_bytes,words=bs/4u;
@@ -257,6 +257,11 @@ static int scan_free_bytes(uint64_t *out,uint32_t *keys)
             }
         }
     }
+    /* Root, bitmap and extension blocks are fixed metadata. Optionally
+     * initialise the integrity checker's ownership set with these blocks. */
+    if(owners)
+        for(size_t i=0;i<capacity;++i)
+            if(seen[i])owners[seen[i]/8u]|=(uint8_t)(1u<<(seen[i]%8u));
     *out=free_blocks*bs;
     rc=IFS_FS_OK;
 done:
@@ -277,7 +282,7 @@ static int measured_free_bytes(uint64_t *out)
     if(!maps || maps>SIZE_MAX/sizeof(uint32_t))return IFS_FS_CORRUPT;
     uint32_t *keys=s.io.allocate(s.io.context,(size_t)maps*sizeof(*keys));
     if(!keys)return IFS_FS_NO_MEMORY;
-    const int rc=scan_free_bytes(out,keys);
+    const int rc=scan_free_bytes(out,keys,NULL);
     s.io.release(s.io.context,keys);
     return rc;
 }
@@ -305,7 +310,7 @@ static int allocation_map(void *volume,uint64_t first,
     uint8_t *map=s.io.allocate(s.io.context,bs);
     if(!map){s.io.release(s.io.context,keys);return IFS_FS_NO_MEMORY;}
     uint64_t free_bytes=0u;
-    int rc=scan_free_bytes(&free_bytes,keys);
+    int rc=scan_free_bytes(&free_bytes,keys,NULL);
     IfsFsAllocationRangeV2 page[64]={{0}};
     uint32_t count=0u,loaded=UINT32_MAX,scanned=0u;
     uint64_t at=first;
@@ -736,7 +741,7 @@ static int grow_create(void *volume,const char *path,uint32_t type)
     int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
     if(type!=IFS_FS_ENTRY_FILE && type!=IFS_FS_ENTRY_DIRECTORY)
         return IFS_FS_UNSUPPORTED;
-    if(!path || path[0]!='/' || !path[1])return IFS_FS_INVALID;
+    if(!path || path[0]!='/' || !path[1] || strstr(path,"//"))return IFS_FS_INVALID;
     const char *slash=strrchr(path,'/');
     const char *leaf=slash+1;
     const size_t bytes=strlen(leaf);
@@ -1174,17 +1179,127 @@ static int volume_label(void *handle,char *out,uint32_t capacity,uint32_t *bytes
         return v2_leave_operation(last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT);
     return v2_leave_operation(convert_name(raw,length,out,capacity,bytes));
 }
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+/* Native read-only ownership verification. FFS DOS1 and DOS3 use a
+ * checksum-protected hash tree and bitmap, without directory-cache blocks.
+ * Every reachable regular file, directory and continuation block must be
+ * uniquely owned and every bitmap allocation must have an owner. This
+ * intentionally refuses unimplemented directory-cache/special-object
+ * layouts rather than certifying an incomplete walk. */
+typedef struct {
+    uint8_t *owners;
+    int status;
+} FfsIntegrity;
+static int integrity_claim(void *opaque,uint32_t block)
+{
+    FfsIntegrity *c=opaque;
+    if(s.io.cancelled && s.io.cancelled(s.io.context)) {
+        c->status=IFS_FS_BUSY;return -1;
+    }
+    if(block<2u || block>=s.v.blocks) {
+        c->status=IFS_FS_CORRUPT;return -1;
+    }
+    const uint8_t mask=(uint8_t)(1u<<(block%8u));
+    if(c->owners[block/8u]&mask) {
+        c->status=IFS_FS_CORRUPT;return -1;
+    }
+    c->owners[block/8u]|=mask;
+    return 0;
+}
+static int integrity_directory(FfsIntegrity *c,const IfsFfsDropInEntry *dir,
+                               unsigned depth)
+{
+    if(depth>64u)return IFS_FS_UNSUPPORTED;
+    const IfsFfsDropInModule *native=ifs_ffs_native_read_ops();
+    IfsFfsDropInDirCursor cursor={0};
+    for(;;) {
+        IfsFfsDropInEntry child={0};uint8_t name[31];
+        if(s.io.cancelled && s.io.cancelled(s.io.context))return IFS_FS_BUSY;
+        last_read_error=IFS_FS_OK;
+        int rc=native->next(&s.v,dir,&cursor,&child,name);
+        if(rc==1)return IFS_FS_OK;
+        if(rc)return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+        if(integrity_claim(c,child.block))return c->status;
+        if(child.type==IFS_FFS_DIRECTORY) {
+            rc=integrity_directory(c,&child,depth+1u);
+            if(rc!=IFS_FS_OK)return rc;
+        } else {
+            last_read_error=IFS_FS_OK;
+            if(ifs_ffs_visit_file_blocks(&s.v,&child,integrity_claim,c))
+                return c->status!=IFS_FS_OK?c->status:
+                       last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+        }
+    }
+}
+static int integrity_check(void *volume,uint32_t flags,uint64_t *errors)
+{
+    if(!errors)return IFS_FS_INVALID;
+    *errors=0u;
+    if(!live(volume))return IFS_FS_INVALID;
+    if(flags || (s.variant!=1u && s.variant!=3u))return IFS_FS_UNSUPPORTED;
+    if(s.write_fault)return IFS_FS_IO_ERROR;
+    const uint32_t bs=s.v.io.block_bytes,words=bs/4u,bits=(words-1u)*32u;
+    const uint64_t span=(uint64_t)s.v.blocks-2u;
+    const uint64_t maps=(span+bits-1u)/bits;
+    const uint64_t owner_bytes=((uint64_t)s.v.blocks+7u)/8u;
+    if(!maps || maps>SIZE_MAX/sizeof(uint32_t) || owner_bytes>SIZE_MAX)
+        return IFS_FS_NO_MEMORY;
+    uint32_t *keys=s.io.allocate(s.io.context,(size_t)maps*sizeof(*keys));
+    uint8_t *owners=s.io.allocate(s.io.context,(size_t)owner_bytes);
+    uint8_t *map=s.io.allocate(s.io.context,bs);
+    int rc=IFS_FS_NO_MEMORY;
+    if(!keys || !owners || !map)goto done;
+    memset(owners,0,(size_t)owner_bytes);
+    uint64_t free_bytes=0u;
+    rc=scan_free_bytes(&free_bytes,keys,owners);
+    if(rc!=IFS_FS_OK)goto done;
+    FfsIntegrity state={owners,IFS_FS_OK};
+    const IfsFfsDropInEntry root=ifs_ffs_native_read_ops()->root(&s.v);
+    rc=integrity_directory(&state,&root,0u);
+    if(rc!=IFS_FS_OK)goto done;
+    /* Match ownership against the real allocation bits, not just counts.
+     * A referenced free block or an allocated unreachable block is corrupt. */
+    for(uint64_t i=0u;i<maps;++i) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context)){rc=IFS_FS_BUSY;goto done;}
+        rc=bitmap_read(keys[i],map);
+        if(rc!=IFS_FS_OK)goto done;
+        if(!bitmap_checksum(map,words)){rc=IFS_FS_CORRUPT;goto done;}
+        const uint64_t start=i*bits;
+        const uint32_t valid=(uint32_t)(span-start<bits?span-start:bits);
+        for(uint32_t bit=0u;bit<valid;++bit) {
+            const uint32_t block=(uint32_t)(2u+start+bit);
+            const int owned=(owners[block/8u]&(1u<<(block%8u)))!=0u;
+            const int is_free=(bitmap_word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u)))!=0u;
+            if(owned==is_free){rc=IFS_FS_CORRUPT;goto done;}
+        }
+    }
+    rc=IFS_FS_OK;
+done:
+    if(map)s.io.release(s.io.context,map);
+    if(owners)s.io.release(s.io.context,owners);
+    if(keys)s.io.release(s.io.context,keys);
+    if(rc==IFS_FS_CORRUPT)*errors=1u;
+    return rc;
+}
+static int guarded_integrity_check(void *volume,uint32_t flags,uint64_t *errors)
+{
+    if(errors)*errors=0u;
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(integrity_check(volume,flags,errors));
+}
+#endif
+
 static const IfsFsVolumeOpsV2 volume_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsVolumeOpsV2),
              IFS_FS_GROUP_VOLUME,0u,
              IFS_FS_VOLUME_QUERY|IFS_FS_VOLUME_SYNC|IFS_FS_VOLUME_LABEL_GET
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-             |IFS_FS_VOLUME_FORMAT
+             |IFS_FS_VOLUME_FORMAT|IFS_FS_VOLUME_CHECK
 #endif
     },
     .query=guarded_v2_query_volume,.sync=guarded_v2_sync_volume,.label=volume_label
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-    ,.format=guarded_format_dos1
+    ,.format=guarded_format_dos1,.check=guarded_integrity_check
 #endif
 };
 static const IfsFsGroupHeaderV2 *query_group(uint32_t id,

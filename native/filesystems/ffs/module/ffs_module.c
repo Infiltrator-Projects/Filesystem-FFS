@@ -288,6 +288,28 @@ int ifs_ffs_data_blocks(const IfsFfsDropInVolume *v,const IfsFfsDropInEntry *fil
     return 0;
 }
 
+/* Visit every file-owned extension and data block exactly once in logical
+ * order. The caller has already claimed the file header. The same native
+ * pointer-page parser used by READ/MAP validates the chain, including EOF. */
+int ifs_ffs_visit_file_blocks(const IfsFfsDropInVolume *v,
+                             const IfsFfsDropInEntry *file,
+                             int (*visit)(void *,uint32_t),void *opaque)
+{
+    PointerPage p;
+    if(!visit || first_page(v,file,&p))return -1;
+    uint32_t previous=p.page;
+    for(uint32_t i=0u;i<p.data_blocks;++i) {
+        uint32_t physical;
+        if(data_pointer(v,file->block,&p,i,&physical))return -1;
+        if(p.page!=previous) {
+            if(visit(opaque,p.page))return -1;
+            previous=p.page;
+        }
+        if(visit(opaque,physical))return -1;
+    }
+    return 0;
+}
+
 static int module_read(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)
 {

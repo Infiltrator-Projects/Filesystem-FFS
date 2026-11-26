@@ -188,6 +188,7 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->create(session,"/Missing/No.bin",IFS_FS_ENTRY_FILE)==IFS_FS_NOT_FOUND);
     CHECK(core->create(session,"/A.BIN/No.bin",IFS_FS_ENTRY_FILE)==IFS_FS_INVALID);
     CHECK(core->create(session,"/Bad/",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_INVALID);
+    CHECK(core->create(session,"//Bad",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_INVALID);
     CHECK(media.writes==before);
     CHECK(core->create(session,"/Dir",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_OK);
     CHECK(core->create(session,"/dir/Sub",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_OK);
@@ -232,6 +233,63 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
               batch[i].length==single.length);
     }
     CHECK(!allocation_test(session,media.size,info.free_bytes));
+    uint64_t errors=UINT64_MAX;
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    /* Forge a checksum-valid bitmap that frees a file data block. The
+     * ownership check must reject it even though metadata is still valid. */
+    const uint32_t data_block=(uint32_t)(batch[0].physical_offset/512u);
+    const uint32_t map_index=(data_block-2u)/4064u;
+    const uint32_t data_bit=(data_block-2u)%4064u;
+    CHECK(map_index<25u);
+    uint8_t *data_map=media.bytes+(uint64_t)word(r,79u+map_index)*512u;
+    const uint32_t data_slot=1u+data_bit/32u,data_mask=UINT32_C(1)<<(data_bit%32u);
+    const uint32_t old_word=word(data_map,data_slot),old_sum=word(data_map,0u);
+    CHECK(!(old_word&data_mask));
+    for(unsigned j=0u;j<4u;++j) {
+        data_map[4u*data_slot+j]=(uint8_t)((old_word|data_mask)>>(24u-8u*j));
+        data_map[j]=(uint8_t)((old_sum-data_mask)>>(24u-8u*j));
+    }
+    before=media.writes;
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_CORRUPT && errors);
+    CHECK(media.writes==before);
+    for(unsigned j=0u;j<4u;++j) {
+        data_map[4u*data_slot+j]=(uint8_t)(old_word>>(24u-8u*j));
+        data_map[j]=(uint8_t)(old_sum>>(24u-8u*j));
+    }
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    /* Flip one genuinely free block to allocated without creating an
+     * owner. This detects an allocation leak, not just crosslinks. */
+    uint32_t orphan_slot=0u,orphan_mask=0u;
+    for(uint32_t j=1u;j<128u && !orphan_mask;++j)
+        for(uint32_t bit=0u;bit<32u;++bit)
+            if(word(first_map,j)&(UINT32_C(1)<<bit)){
+                orphan_slot=j;orphan_mask=UINT32_C(1)<<bit;break;
+            }
+    /* The first map can be full on the small test. Use the last bitmap
+     * in that case; the test media has ample unallocated capacity. */
+    uint8_t *orphan_map=first_map;
+    if(!orphan_mask) {
+        CHECK(total_maps>=2u && total_maps<=25u);
+        orphan_map=media.bytes+(uint64_t)word(r,79u+total_maps-1u)*512u;
+        for(uint32_t j=1u;j<128u && !orphan_mask;++j)
+            for(uint32_t bit=0u;bit<32u;++bit)
+                if((uint64_t)(total_maps-1u)*4064u+(j-1u)*32u+bit+2u<blocks &&
+                   (word(orphan_map,j)&(UINT32_C(1)<<bit))){
+                    orphan_slot=j;orphan_mask=UINT32_C(1)<<bit;break;
+                }
+    }
+    CHECK(orphan_mask);
+    const uint32_t ow=word(orphan_map,orphan_slot),os=word(orphan_map,0u);
+    for(unsigned j=0u;j<4u;++j) {
+        orphan_map[4u*orphan_slot+j]=(uint8_t)((ow&~orphan_mask)>>(24u-8u*j));
+        orphan_map[j]=(uint8_t)((os+orphan_mask)>>(24u-8u*j));
+    }
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_CORRUPT && errors);
+    for(unsigned j=0u;j<4u;++j) {
+        orphan_map[4u*orphan_slot+j]=(uint8_t)(ow>>(24u-8u*j));
+        orphan_map[j]=(uint8_t)(os>>(24u-8u*j));
+    }
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
     CHECK(core->unmount(session)==IFS_FS_OK);
     result=0;
 done:
@@ -251,7 +309,7 @@ int main(void)
        !core->stat || !core->directory_entry || !core->read || !core->write ||
        !core->create || core->remove || core->truncate ||
        !volume || !volume->query || !volume->sync ||
-       !volume->format || volume->repair ||
+       !volume->format || !volume->check || volume->repair ||
        !defrag || defrag->header.capabilities!=IFS_FS_DEFRAG_MAP ||
        !defrag->map || defrag->plan || defrag->execute || defrag->verify ||
        defrag->recover || defrag->release_plan ||
