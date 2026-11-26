@@ -33,7 +33,7 @@ static struct {
     IfsFsHostRuntimeV2 io;
     uintptr_t generation,handle;
     uint32_t variant;
-    int mounted;
+    int mounted,recovery_pending;
     int growth_ready,write_fault;
     uint32_t growth_first,growth_hint;
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
@@ -44,9 +44,10 @@ static struct {
  * host failure instead of treating an unavailable sector as missing files,
  * corrupt metadata or a different filesystem. One active session per SO. */
 static int last_read_error=IFS_FS_OK;
-static int live(void *v){
+static int session_live(void *v){
     return s.mounted && s.handle && (uintptr_t)v==s.handle && s.v.mounted;
 }
+static int live(void *v){return session_live(v) && !s.recovery_pending;}
 static int host_ok(const IfsFsHostRuntimeV2 *h)
 {
     return ifs_fs_host_v2_valid(h) && h->volume_bytes>=8192u;
@@ -378,6 +379,52 @@ static const IfsFsAllocationOpsV2 allocation_ops={
     .map=guarded_allocation_map
 };
 
+/* The native formatter leaves the second boot sector empty. During an
+ * offline relocation it is a temporary redo locator, never a permanent
+ * filesystem extension. Do not overwrite arbitrary foreign boot code.
+ * A dirty locator blocks every ordinary mount operation until replay.
+ * This profile requires 512-byte physical sectors; a torn locator is
+ * rejected, never interpreted as authority for arbitrary writes. */
+static const uint8_t relocation_magic[8]={'I','F','S','F','F','S','R','1'};
+static uint32_t relocation_crc(uint32_t crc,const uint8_t *p,size_t n)
+{
+    while(n--) {
+        crc^=*p++;
+        for(unsigned k=0u;k<8u;++k)
+            crc=(crc>>1)^((0u-(crc&1u))&UINT32_C(0x82f63b78));
+    }
+    return crc;
+}
+static int relocation_marker(uint8_t marker[512],int *pending)
+{
+    *pending=0;
+    if(s.variant!=1u || s.v.io.block_bytes!=512u ||
+       s.io.logical_sector_bytes!=512u || s.io.physical_sector_bytes!=512u)
+        return IFS_FS_UNSUPPORTED;
+    uint8_t boot[512];
+    int rc=ifs_fs_host_read_bytes_v2(&s.io,0u,boot,sizeof(boot));
+    if(rc!=IFS_FS_OK)return rc;
+    if(memcmp(boot,"DOS\001",4u) || bitmap_word(boot,2u)!=s.v.root_block)
+        return IFS_FS_UNSUPPORTED;
+    uint32_t sum=0u;
+    for(unsigned i=0u;i<128u;++i) {
+        uint32_t next=sum+bitmap_word(boot,i);
+        sum=next+(next<sum?1u:0u);
+    }
+    if(sum!=UINT32_MAX)return IFS_FS_UNSUPPORTED;
+    for(unsigned i=12u;i<512u;++i)if(boot[i])return IFS_FS_UNSUPPORTED;
+    rc=ifs_fs_host_read_bytes_v2(&s.io,512u,marker,512u);
+    if(rc!=IFS_FS_OK)return rc;
+    unsigned nonzero=0u;
+    for(unsigned i=0u;i<512u;++i)nonzero|=marker[i];
+    if(!nonzero)return IFS_FS_OK;
+    if(memcmp(marker,relocation_magic,sizeof(relocation_magic)) ||
+       bitmap_word(marker,127u)!=relocation_crc(UINT32_MAX,marker,508u))
+        return IFS_FS_CORRUPT;
+    *pending=1;
+    return IFS_FS_OK;
+}
+
 static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
                  IfsFsVolumeInfoV2 *info){
     uint32_t variant;int r;
@@ -403,7 +450,7 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     /* The native engine retains this callback context through unmount. */
     s.v.io.context=&s.io;
     s.variant=variant;s.mounted=1;
-    s.growth_ready=0;s.write_fault=0;s.growth_first=0;s.growth_hint=0;
+    s.growth_ready=0;s.write_fault=0;s.recovery_pending=0;s.growth_first=0;s.growth_hint=0;
     s.handle=++s.generation;
     info->variant=variant;info->max_name_bytes=60u;
     info->block_bytes=s.v.io.block_bytes;
@@ -411,6 +458,18 @@ static int mount(const IfsFsHostRuntimeV2 *h,void **volume,
     /* Permit forensic namespace reads on a damaged allocation map, but
      * never grant a writable session whose free-space ownership is invalid.
      * The explicit VOLUME.QUERY and ALLOCATION.MAP still report the error. */
+    uint8_t marker[512];int pending=0;
+    r=relocation_marker(marker,&pending);
+    if(r!=IFS_FS_OK && r!=IFS_FS_UNSUPPORTED) {
+        s.v.mounted=0u;s.mounted=0;s.handle=0;return r;
+    }
+    if(pending) {
+        if(h->capabilities&IFS_FS_HOST_READ_ONLY) {
+            s.v.mounted=0u;s.mounted=0;s.handle=0;return IFS_FS_BUSY;
+        }
+        s.recovery_pending=1;info->free_bytes=0u;
+        *volume=(void *)s.handle;return IFS_FS_OK;
+    }
     r=measured_free_bytes(&info->free_bytes);
     if(r!=IFS_FS_OK && (!(h->capabilities&IFS_FS_HOST_READ_ONLY) ||
        (r!=IFS_FS_CORRUPT && r!=IFS_FS_UNSUPPORTED))) {
@@ -429,7 +488,7 @@ static int guarded_mount(const IfsFsHostRuntimeV2 *h,void **volume,
 }
 
 static int unmount(void *volume){
-    if(!live(volume))return IFS_FS_INVALID;
+    if(!session_live(volume))return IFS_FS_INVALID;
     #if !defined(IFS_FFS_FIRMWARE_BUILD)
     if(s.plan){free_relocation_plan(s.plan);s.plan=NULL;}
     #endif
@@ -748,6 +807,7 @@ static int grow_allocated(FfsTxn *t,uint32_t n)
 }
 static int grow_create(void *volume,const char *path,uint32_t type)
 {
+    if(s.plan)return IFS_FS_BUSY;
     int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
     if(type!=IFS_FS_ENTRY_FILE && type!=IFS_FS_ENTRY_DIRECTORY)
         return IFS_FS_UNSUPPORTED;
@@ -887,6 +947,7 @@ static int write_file(void *volume,const char *path,uint64_t offset,
                       const void *data,uint32_t len){
     IfsFfsDropInEntry e={0};const char *name;uint32_t n;
     if(!live(volume)||(!data&&len))return IFS_FS_INVALID;
+    if(s.plan)return IFS_FS_BUSY;
     if((s.io.capabilities&IFS_FS_HOST_READ_ONLY)||
        !(s.io.capabilities&IFS_FS_HOST_EXCLUSIVE)||
        !(s.io.capabilities&IFS_FS_HOST_DURABLE)||
@@ -949,7 +1010,7 @@ static int guarded_v2_sync_volume(void *volume)
 /* Source-owned, read-only Common V2 per-file extent enumeration.
  * A page is fully verified before exposing any returned extent; never
  * infer an allocation from a short or corrupt file-extension chain.
- * PLAN/EXECUTE/VERIFY/RECOVER are not qualified and stay absent. */
+ * Hosted relocation uses the separately qualified native redo protocol. */
 static int map_file(void *volume,const char *path,uint64_t first,
                     IfsFsExtentV2 *out,uint32_t capacity,uint32_t *written)
 {
@@ -1006,17 +1067,21 @@ static int guarded_map_file(void *volume,const char *path,uint64_t first,
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
 static int guarded_relocation_plan(void *,const char *,uint32_t,void **);
 static void guarded_release_relocation_plan(void *,void *);
+static int guarded_relocation_execute(void *,void *,uint64_t *);
+static int guarded_relocation_verify(void *,void *);
+static int guarded_relocation_recover(void *,uint32_t,uint64_t *);
 #endif
 static const IfsFsDefragOpsV2 defrag_map_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsDefragOpsV2),
              IFS_FS_GROUP_DEFRAG,0u,IFS_FS_DEFRAG_MAP
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
-             |IFS_FS_DEFRAG_PLAN
+             |IFS_FS_DEFRAG_PLAN|IFS_FS_DEFRAG_EXECUTE|IFS_FS_DEFRAG_VERIFY|IFS_FS_DEFRAG_RECOVER
 #endif
     },
     .map=guarded_map_file
 #if !defined(IFS_FFS_FIRMWARE_BUILD)
     ,.plan=guarded_relocation_plan,.release_plan=guarded_release_relocation_plan
+    ,.execute=guarded_relocation_execute,.verify=guarded_relocation_verify,.recover=guarded_relocation_recover
 #endif
 };
 static const IfsFsCoreOpsV2 core={
@@ -1317,12 +1382,13 @@ static int guarded_integrity_check(void *volume,uint32_t flags,uint64_t *errors)
  * No EXECUTE, VERIFY or RECOVER capability is claimed by this planner. */
 typedef struct {
     uint32_t header,source_first,destination,blocks,reserve;
-    uint32_t bytes;
+    uint32_t bytes,digest;
     int relocate;
 } FfsRelocationEntry;
 struct FfsRelocationPlan {
     uintptr_t generation;
-    uint32_t policy;
+    uint32_t policy,journal_first,journal_blocks;
+    int executed;
     size_t count,capacity;
     FfsRelocationEntry *entries;
 };
@@ -1405,7 +1471,8 @@ static int planner_file(FfsPlanner *p,const IfsFfsDropInEntry *file)
         planner_take(p,destination,blocks+reserve);
     }
     return planner_append(p,(FfsRelocationEntry){
-        file->block,first,destination,blocks,reserve,file->size,!retain});
+        .header=file->block,.source_first=first,.destination=destination,
+        .blocks=blocks,.reserve=reserve,.bytes=file->size,.relocate=!retain});
 }
 static int planner_directory(FfsPlanner *p,const IfsFfsDropInEntry *dir,
                               unsigned depth)
@@ -1470,6 +1537,25 @@ static int relocation_plan(void *volume,const char *path,uint32_t policy,void **
     FfsPlanner planner={plan,bitmap};
     rc=target.type==IFS_FFS_DIRECTORY?planner_directory(&planner,&target,0u):
         planner_file(&planner,&target);
+    if(rc==IFS_FS_OK) {
+        /* Journal sectors are selected from the same private free map,
+         * after all destinations and growth gaps are excluded. One run
+         * is reused for successive independent file transactions. */
+        uint32_t pages=0u;
+        for(size_t i=0u;i<plan->count;++i)
+            if(plan->entries[i].relocate) {
+                uint32_t need=(plan->entries[i].blocks+71u)/72u;
+                if(need>pages)pages=need;
+            }
+        if(pages && bs==512u) {
+            uint64_t need=2u*(maps+pages);
+            if(need>UINT32_MAX)rc=IFS_FS_NO_SPACE;
+            else {
+                plan->journal_blocks=(uint32_t)need;
+                rc=planner_run(&planner,plan->journal_blocks,&plan->journal_first);
+            }
+        }
+    }
     if(rc==IFS_FS_OK){s.plan=plan;*out=plan;plan=NULL;}
 done:
     free_relocation_plan(plan);
@@ -1487,10 +1573,379 @@ static int guarded_relocation_plan(void *volume,const char *path,uint32_t policy
 static void guarded_release_relocation_plan(void *volume,void *plan)
 {
     if(!v2_enter_operation())return;
-    if(live(volume) && plan && s.plan==plan) {
+    if(session_live(volume) && plan && s.plan==plan) {
         free_relocation_plan(s.plan);s.plan=NULL;
     }
     (void)v2_leave_operation(IFS_FS_OK);
+}
+
+/* Each redo record consists of one checksummed descriptor and one full
+ * native metadata sector. File data is copied to free destinations and
+ * verified BEFORE publishing the locator; original data remains allocated.
+ * The journal itself occupies temporary free blocks excluded from all
+ * planned destinations. Replaying a committed locator is idempotent.
+ * No old data is overwritten, and no filesystem worker is involved. */
+static int relocation_sector(uint32_t block,const uint8_t *data)
+{
+    return ifs_fs_host_write_bytes_v2(&s.io,(uint64_t)block*512u,data,512u);
+}
+static int relocation_flush(void)
+{
+    return s.io.flush(s.io.context)==0?IFS_FS_OK:IFS_FS_IO_ERROR;
+}
+static int relocation_digest(uint32_t start,uint32_t blocks,uint32_t *digest)
+{
+    uint8_t data[512];
+    uint32_t crc=UINT32_MAX;
+    for(uint32_t i=0u;i<blocks;++i) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context))return IFS_FS_BUSY;
+        int rc=bitmap_read(start+i,data);if(rc!=IFS_FS_OK)return rc;
+        crc=relocation_crc(crc,data,sizeof(data));
+    }
+    *digest=crc;return IFS_FS_OK;
+}
+static int relocation_record(uint32_t start,uint32_t index,uint32_t target,
+                             const uint8_t data[512],uint32_t *digest)
+{
+    uint8_t tag[512]={0};
+    grow_word(tag,0u,target);
+    grow_word(tag,1u,relocation_crc(UINT32_MAX,data,512u));
+    grow_word(tag,2u,index);
+    grow_word(tag,127u,relocation_crc(UINT32_MAX,tag,508u));
+    int rc=relocation_sector(start+index*2u,tag);
+    if(rc==IFS_FS_OK)rc=relocation_sector(start+index*2u+1u,data);
+    if(rc==IFS_FS_OK) {
+        *digest=relocation_crc(*digest,tag,512u);
+        *digest=relocation_crc(*digest,data,512u);
+    }
+    return rc;
+}
+static int relocation_read_record(uint32_t start,uint32_t index,
+                                  uint32_t *target,uint8_t data[512],
+                                  uint32_t *digest)
+{
+    uint8_t tag[512];
+    int rc=bitmap_read(start+index*2u,tag);
+    if(rc==IFS_FS_OK)rc=bitmap_read(start+index*2u+1u,data);
+    if(rc!=IFS_FS_OK)return rc;
+    if(bitmap_word(tag,2u)!=index ||
+       bitmap_word(tag,127u)!=relocation_crc(UINT32_MAX,tag,508u) ||
+       bitmap_word(tag,1u)!=relocation_crc(UINT32_MAX,data,512u))
+        return IFS_FS_CORRUPT;
+    *target=bitmap_word(tag,0u);
+    if(digest) {
+        *digest=relocation_crc(*digest,tag,512u);
+        *digest=relocation_crc(*digest,data,512u);
+    }
+    return IFS_FS_OK;
+}
+/* Validate the entire journal before replaying any sector. Bounds, unique
+ * targets, native bitmap geometry and the complete replacement file chain
+ * are independently checked; the marker cannot address boot/root blocks,
+ * journal blocks or destination data. The full data copy is checked too. */
+static int relocation_replay(const uint8_t marker[512],uint64_t *repaired)
+{
+    const uint32_t start=bitmap_word(marker,2u),records=bitmap_word(marker,3u);
+    const uint32_t file=bitmap_word(marker,4u),dest=bitmap_word(marker,5u);
+    const uint32_t blocks=bitmap_word(marker,6u),pages=bitmap_word(marker,7u);
+    const uint32_t maps=(s.v.blocks-2u+GROW_BITS-1u)/GROW_BITS;
+    const uint32_t exts=maps>25u?(maps-25u+126u)/127u:0u;
+    const uint32_t fixed=grow_metadata(maps+exts-1u);
+    if(!blocks || pages!=(blocks+71ull)/72u || records<pages ||
+       records-pages>maps || start<=fixed || start>=s.v.blocks ||
+       records>(s.v.blocks-start)/2u || dest<=fixed || dest>=s.v.blocks ||
+       blocks>s.v.blocks-dest || file<=fixed || file>=s.v.blocks ||
+       file==s.v.root_block || bitmap_word(marker,10u)!=s.v.blocks ||
+       bitmap_word(marker,11u)!=s.v.root_block ||
+       (s.v.root_block>=start && s.v.root_block-start<2u*records) ||
+       (s.v.root_block>=dest && s.v.root_block-dest<blocks) ||
+       ((uint64_t)start+2u*records>dest && (uint64_t)dest+blocks>start))
+        return IFS_FS_CORRUPT;
+    uint32_t actual=0u;
+    int rc=relocation_digest(dest,blocks,&actual);
+    if(rc!=IFS_FS_OK)return rc;
+    if(actual!=bitmap_word(marker,9u))return IFS_FS_CORRUPT;
+    const size_t owner_bytes=((size_t)s.v.blocks+7u)/8u;
+    uint8_t *seen=s.io.allocate(s.io.context,owner_bytes);
+    if(!seen)return IFS_FS_NO_MEMORY;
+    memset(seen,0,owner_bytes);
+    uint32_t crc=UINT32_MAX,expected_page=file,logical=0u;
+    uint8_t raw[512];
+    for(uint32_t i=0u;i<records;++i) {
+        uint32_t target;
+        rc=relocation_read_record(start,i,&target,raw,&crc);
+        if(rc!=IFS_FS_OK)goto done;
+        if(target<2u || target>=s.v.blocks || target==s.v.root_block ||
+           (target>=start && target-start<2u*records) ||
+           (target>=dest && target-dest<blocks) ||
+           (seen[target/8u]&(1u<<(target%8u))) || !bitmap_checksum(raw,128u)) {
+            rc=IFS_FS_CORRUPT;goto done;
+        }
+        seen[target/8u]|=(uint8_t)(1u<<(target%8u));
+        if(i<pages) {
+            uint32_t count=blocks-logical;if(count>72u)count=72u;
+            if(target<=fixed || target!=expected_page ||
+               bitmap_word(raw,0u)!=(i?16u:2u) ||
+               bitmap_word(raw,1u)!=target || bitmap_word(raw,2u)!=count ||
+               bitmap_word(raw,127u)!=(uint32_t)-3 ||
+               (i && bitmap_word(raw,125u)!=file) ||
+               (!i && bitmap_word(raw,4u)!=dest)) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+            for(uint32_t k=0u;k<72u;++k)
+                if(bitmap_word(raw,77u-k)!=(k<count?dest+logical+k:0u)) {
+                    rc=IFS_FS_CORRUPT;goto done;
+                }
+            logical+=count;expected_page=bitmap_word(raw,126u);
+            if((i+1u==pages)!=(expected_page==0u)) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+        } else {
+            /* Formatter's bitmap keys are contiguous around the root. */
+            uint32_t ordinal=target-2u-(target>s.v.root_block);
+            if(ordinal>=maps || grow_metadata(ordinal)!=target) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+            const uint64_t base=2u+(uint64_t)ordinal*GROW_BITS;
+            for(uint32_t bit=0u;bit<GROW_BITS;++bit) {
+                const uint64_t block=base+bit;
+                if((block<=fixed || block==s.v.root_block || block>=s.v.blocks ||
+                    (block>=dest && block-dest<blocks)) &&
+                   (bitmap_word(raw,1u+bit/32u)&(UINT32_C(1)<<(bit%32u)))) {
+                    rc=IFS_FS_CORRUPT;goto done;
+                }
+            }
+        }
+    }
+    if(crc!=bitmap_word(marker,8u)){rc=IFS_FS_CORRUPT;goto done;}
+    /* After publication cancellation cannot abandon a half-applied
+     * transaction. The durable locator survives every I/O failure. */
+    for(uint32_t i=0u;i<records;++i) {
+        uint32_t target;
+        rc=relocation_read_record(start,i,&target,raw,NULL);
+        if(rc==IFS_FS_OK)rc=relocation_sector(target,raw);
+        if(rc!=IFS_FS_OK)goto done;
+    }
+    rc=relocation_flush();if(rc!=IFS_FS_OK)goto done;
+    /* Validate the fully replayed native tree before clearing authority.
+     * Temporarily allow only this internal check, not external operations. */
+    s.recovery_pending=0;s.write_fault=0;
+    uint64_t errors=0u;
+    rc=integrity_check((void *)s.handle,0u,&errors);
+    s.recovery_pending=1;
+    if(rc!=IFS_FS_OK)goto done;
+    memset(raw,0,sizeof(raw));
+    rc=relocation_sector(1u,raw);
+    if(rc==IFS_FS_OK)rc=relocation_flush();
+    if(rc==IFS_FS_OK) {
+        s.recovery_pending=0;s.growth_ready=0;s.write_fault=0;
+        if(repaired)*repaired=records;
+    }
+done:
+    s.io.release(s.io.context,seen);
+    return rc;
+}
+static int relocation_one(FfsRelocationPlan *plan,FfsRelocationEntry *e)
+{
+    const uint32_t pages=(e->blocks+71u)/72u;
+    const uint32_t maps=(s.v.blocks-2u+GROW_BITS-1u)/GROW_BITS;
+    uint32_t *data=s.io.allocate(s.io.context,(size_t)e->blocks*sizeof(*data));
+    uint32_t *keys=s.io.allocate(s.io.context,(size_t)pages*sizeof(*keys));
+    uint8_t *bitmaps=s.io.allocate(s.io.context,(size_t)maps*512u);
+    uint8_t *dirty=s.io.allocate(s.io.context,maps);
+    int rc=IFS_FS_NO_MEMORY;
+    if(!data || !keys || !bitmaps || !dirty)goto done;
+    memset(dirty,0,maps);
+    IfsFfsDropInEntry file={.block=e->header,.size=e->bytes,.type=IFS_FFS_FILE};
+    last_read_error=IFS_FS_OK;
+    if(ifs_ffs_relocation_blocks(&s.v,&file,data,e->blocks,keys,pages)) {
+        rc=last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;goto done;
+    }
+    if(data[0]!=e->source_first){rc=IFS_FS_CORRUPT;goto done;}
+    for(uint32_t i=0u;i<maps;++i) {
+        rc=bitmap_read(grow_metadata(i),bitmaps+(size_t)i*512u);
+        if(rc!=IFS_FS_OK)goto done;
+        if(!bitmap_checksum(bitmaps+(size_t)i*512u,128u)){rc=IFS_FS_CORRUPT;goto done;}
+    }
+    /* Check destination, growth gap and redo scratch against the live
+     * native bitmap before touching any free data sector. */
+    for(unsigned range=0u;range<2u;++range) {
+        uint32_t first=range?plan->journal_first:e->destination;
+        uint32_t count=range?plan->journal_blocks:e->blocks+e->reserve;
+        if(first<s.growth_first || first>=s.v.blocks || count>s.v.blocks-first) {
+            rc=IFS_FS_CORRUPT;goto done;
+        }
+        for(uint32_t j=0u;j<count;++j) {
+            uint32_t bit=first+j-2u;
+            const uint8_t *map=bitmaps+(size_t)(bit/GROW_BITS)*512u;
+            bit%=GROW_BITS;
+            if(!(bitmap_word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u)))) {
+                rc=IFS_FS_CORRUPT;goto done;
+            }
+        }
+    }
+    uint8_t raw[512],copy[512];
+    uint32_t digest=UINT32_MAX;
+    for(uint32_t i=0u;i<e->blocks;++i) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context)){rc=IFS_FS_BUSY;goto done;}
+        uint32_t old=data[i]-2u,newbit=e->destination+i-2u;
+        uint32_t oi=old/GROW_BITS,ni=newbit/GROW_BITS;
+        old%=GROW_BITS;newbit%=GROW_BITS;
+        uint8_t *om=bitmaps+(size_t)oi*512u,*nm=bitmaps+(size_t)ni*512u;
+        uint32_t ow=1u+old/32u,nw=1u+newbit/32u;
+        uint32_t ob=UINT32_C(1)<<(old%32u),nb=UINT32_C(1)<<(newbit%32u);
+        if(bitmap_word(om,ow)&ob || !(bitmap_word(nm,nw)&nb)) {
+            rc=IFS_FS_CORRUPT;goto done;
+        }
+        grow_word(om,ow,bitmap_word(om,ow)|ob);
+        grow_word(nm,nw,bitmap_word(nm,nw)&~nb);
+        dirty[oi]=dirty[ni]=1;
+        rc=bitmap_read(data[i],raw);
+        if(rc==IFS_FS_OK)rc=relocation_sector(e->destination+i,raw);
+        if(rc==IFS_FS_OK)rc=bitmap_read(e->destination+i,copy);
+        if(rc!=IFS_FS_OK)goto done;
+        if(memcmp(raw,copy,512u)){rc=IFS_FS_IO_ERROR;goto done;}
+        digest=relocation_crc(digest,raw,512u);
+    }
+    /* Durable data before durable redo, then durable publication. */
+    rc=relocation_flush();if(rc!=IFS_FS_OK)goto done;
+    uint32_t records=0u,crc=UINT32_MAX,logical=0u;
+    for(uint32_t i=0u;i<pages;++i) {
+        rc=bitmap_read(keys[i],raw);if(rc!=IFS_FS_OK)goto done;
+        if(!bitmap_checksum(raw,128u)){rc=IFS_FS_CORRUPT;goto done;}
+        const uint32_t count=e->blocks-logical<72u?e->blocks-logical:72u;
+        for(uint32_t k=0u;k<72u;++k)
+            grow_word(raw,77u-k,k<count?e->destination+logical+k:0u);
+        if(!i || bitmap_word(raw,4u))grow_word(raw,4u,e->destination+logical);
+        grow_checksum(raw,5u);
+        rc=relocation_record(plan->journal_first,records++,keys[i],raw,&crc);
+        if(rc!=IFS_FS_OK)goto done;
+        logical+=count;
+    }
+    for(uint32_t i=0u;i<maps;++i)if(dirty[i]) {
+        uint8_t *map=bitmaps+(size_t)i*512u;grow_checksum(map,0u);
+        rc=relocation_record(plan->journal_first,records++,grow_metadata(i),map,&crc);
+        if(rc!=IFS_FS_OK)goto done;
+    }
+    if(records>plan->journal_blocks/2u){rc=IFS_FS_CORRUPT;goto done;}
+    rc=relocation_flush();if(rc!=IFS_FS_OK)goto done;
+    if(s.io.cancelled && s.io.cancelled(s.io.context)){rc=IFS_FS_BUSY;goto done;}
+    memset(raw,0,sizeof(raw));memcpy(raw,relocation_magic,sizeof(relocation_magic));
+    grow_word(raw,2u,plan->journal_first);grow_word(raw,3u,records);
+    grow_word(raw,4u,e->header);grow_word(raw,5u,e->destination);
+    grow_word(raw,6u,e->blocks);grow_word(raw,7u,pages);
+    grow_word(raw,8u,crc);grow_word(raw,9u,digest);
+    grow_word(raw,10u,s.v.blocks);grow_word(raw,11u,s.v.root_block);
+    grow_word(raw,127u,relocation_crc(UINT32_MAX,raw,508u));
+    s.recovery_pending=1;
+    rc=relocation_sector(1u,raw);
+    if(rc==IFS_FS_OK)rc=relocation_flush();
+    if(rc==IFS_FS_OK)rc=relocation_replay(raw,NULL);
+    if(rc==IFS_FS_OK)e->digest=digest;
+done:
+    if(dirty)s.io.release(s.io.context,dirty);
+    if(bitmaps)s.io.release(s.io.context,bitmaps);
+    if(keys)s.io.release(s.io.context,keys);
+    if(data)s.io.release(s.io.context,data);
+    return rc;
+}
+static int relocation_execute(void *volume,void *opaque,uint64_t *moved)
+{
+    if(!moved)return IFS_FS_INVALID;
+    *moved=0u;
+    if(!live(volume) || !opaque || opaque!=s.plan || s.plan->executed)
+        return IFS_FS_INVALID;
+    int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
+    uint8_t marker[512];int pending=0;
+    rc=relocation_marker(marker,&pending);
+    if(rc!=IFS_FS_OK || pending)return rc!=IFS_FS_OK?rc:IFS_FS_BUSY;
+    uint64_t errors=0u;
+    rc=integrity_check(volume,0u,&errors);if(rc!=IFS_FS_OK)return rc;
+    /* Any attempted execution consumes its plan even on failure. */
+    s.plan->executed=-1;
+    for(size_t i=0u;i<s.plan->count;++i) {
+        FfsRelocationEntry *e=&s.plan->entries[i];
+        if(e->relocate) {
+            rc=relocation_one(s.plan,e);if(rc!=IFS_FS_OK)return rc;
+            *moved+=(uint64_t)e->blocks*512u;
+        }
+    }
+    s.plan->executed=1;
+    return IFS_FS_OK;
+}
+static int relocation_verify(void *volume,void *opaque)
+{
+    if(!live(volume) || !opaque || opaque!=s.plan || s.plan->executed!=1)
+        return IFS_FS_INVALID;
+    uint64_t errors=0u;int rc=integrity_check(volume,0u,&errors);
+    if(rc!=IFS_FS_OK)return rc;
+    for(size_t i=0u;i<s.plan->count;++i) {
+        FfsRelocationEntry *e=&s.plan->entries[i];
+        IfsFfsDropInEntry file={.block=e->header,.size=e->bytes,.type=IFS_FFS_FILE};
+        uint32_t first,blocks;int packed;
+        last_read_error=IFS_FS_OK;
+        if(ifs_ffs_file_layout(&s.v,&file,&first,&blocks,&packed))
+            return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+        if(!packed || first!=e->destination || blocks!=e->blocks)return IFS_FS_CORRUPT;
+        if(e->relocate) {
+            uint32_t digest;
+            rc=relocation_digest(first,blocks,&digest);
+            if(rc!=IFS_FS_OK)return rc;
+            if(digest!=e->digest)return IFS_FS_CORRUPT;
+        }
+        uint32_t loaded=UINT32_MAX;uint8_t map[512];
+        for(uint32_t j=0u;j<e->reserve;++j) {
+            uint32_t bit=first+blocks+j-2u,index=bit/GROW_BITS;
+            if(index!=loaded) {
+                rc=bitmap_read(grow_metadata(index),map);if(rc!=IFS_FS_OK)return rc;
+                if(!bitmap_checksum(map,128u))return IFS_FS_CORRUPT;
+                loaded=index;
+            }
+            bit%=GROW_BITS;
+            if(!(bitmap_word(map,1u+bit/32u)&(UINT32_C(1)<<(bit%32u))))
+                return IFS_FS_CORRUPT;
+        }
+    }
+    return IFS_FS_OK;
+}
+static int relocation_recover(void *volume,uint32_t flags,uint64_t *repaired)
+{
+    if(!repaired)return IFS_FS_INVALID;
+    *repaired=0u;
+    if(!session_live(volume) || flags)return IFS_FS_INVALID;
+    if((s.io.capabilities&IFS_FS_HOST_READ_ONLY) ||
+       !(s.io.capabilities&IFS_FS_HOST_EXCLUSIVE) ||
+       !(s.io.capabilities&IFS_FS_HOST_DURABLE))return IFS_FS_ACCESS;
+    uint8_t marker[512];int pending=0;
+    int rc=relocation_marker(marker,&pending);
+    if(rc!=IFS_FS_OK)return rc;
+    if(!pending) {
+        /* A failed locator-clear flush may have completed the write.
+         * Confirm native integrity before unblocking the session. */
+        s.recovery_pending=0;s.write_fault=0;
+        uint64_t errors=0u;rc=integrity_check(volume,0u,&errors);
+        if(rc!=IFS_FS_OK)s.recovery_pending=1;
+        return rc;
+    }
+    s.recovery_pending=1;
+    return relocation_replay(marker,repaired);
+}
+static int guarded_relocation_execute(void *volume,void *plan,uint64_t *moved)
+{
+    if(moved)*moved=0u;
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(relocation_execute(volume,plan,moved));
+}
+static int guarded_relocation_verify(void *volume,void *plan)
+{
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(relocation_verify(volume,plan));
+}
+static int guarded_relocation_recover(void *volume,uint32_t flags,uint64_t *repaired)
+{
+    if(repaired)*repaired=0u;
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(relocation_recover(volume,flags,repaired));
 }
 #endif
 

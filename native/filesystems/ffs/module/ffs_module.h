@@ -100,4 +100,7 @@ int ifs_ffs_visit_file_blocks(const IfsFfsDropInVolume *,
 int ifs_ffs_file_layout(const IfsFfsDropInVolume *,
                          const IfsFfsDropInEntry *,uint32_t *first,
                          uint32_t *count,int *contiguous);
+int ifs_ffs_relocation_blocks(const IfsFfsDropInVolume *,
+    const IfsFfsDropInEntry *,uint32_t *data,uint32_t count,
+    uint32_t *pages,uint32_t page_count);
 #endif

@@ -330,6 +330,23 @@ int ifs_ffs_file_layout(const IfsFfsDropInVolume *v,const IfsFfsDropInEntry *fil
     return 0;
 }
 
+/* Snapshot the complete data pointer order and the native metadata page
+ * chain in one pass. Caller sizes both arrays from the verified inode. */
+int ifs_ffs_relocation_blocks(const IfsFfsDropInVolume *v,
+    const IfsFfsDropInEntry *file,uint32_t *data,uint32_t count,
+    uint32_t *pages,uint32_t page_count)
+{
+    PointerPage p;
+    if(!data || !pages || first_page(v,file,&p) ||
+       count!=p.data_blocks || page_count!=p.pages)return -1;
+    pages[0]=p.page;
+    for(uint32_t i=0u;i<count;++i) {
+        if(data_pointer(v,file->block,&p,i,&data[i]))return -1;
+        pages[p.index]=p.page;
+    }
+    return 0;
+}
+
 static int module_read(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)
 {

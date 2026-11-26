@@ -6,7 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 extern const IfsFsModuleApiV2 *infiltrator_filesystem_api_v2(void);
-typedef struct {uint8_t *bytes;uint64_t size;unsigned writes,flushes;} Media;
+typedef struct {uint8_t *bytes;uint64_t size;unsigned writes,flushes,fail_flush;} Media;
 static int rd(void *ctx,uint64_t at,void *out,uint32_t n)
 {
     Media *m=ctx;
@@ -20,7 +20,7 @@ static int wr(void *ctx,uint64_t at,const void *in,uint32_t n)
     memcpy(m->bytes+at,in,n);++m->writes;return 0;
 }
 static int cancelled(void *ctx){(void)ctx;return 1;}
-static int flush(void *ctx){++((Media*)ctx)->flushes;return 0;}
+static int flush(void *ctx){Media *m=ctx;return ++m->flushes==m->fail_flush?-1:0;}
 static void *alloc(void *ctx,size_t n){(void)ctx;return malloc(n);}
 static void rel(void *ctx,void *p){(void)ctx;free(p);}
 static uint32_t word(const uint8_t *p,unsigned n)
@@ -240,6 +240,8 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     void *plan=NULL;
     before=media.writes;
     CHECK(map->plan(session,"/",0u,&plan)==IFS_FS_OK && plan);
+    uint64_t moved=99u;
+    CHECK(map->execute(session,plan,&moved)==IFS_FS_ACCESS && !moved);
     void *second=NULL;
     CHECK(map->plan(session,"/",10u,&second)==IFS_FS_BUSY && !second);
     map->release_plan(session,plan);plan=NULL;
@@ -308,6 +310,40 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     }
     CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
     CHECK(core->unmount(session)==IFS_FS_OK);
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_OK);
+    CHECK(map->plan(session,"/",10u,&plan)==IFS_FS_OK && plan);
+    /* Fail after the redo locator is written. A cold writable mount
+     * must block ordinary reads until actual provider replay completes. */
+    media.fail_flush=media.flushes+3u;
+    CHECK(map->execute(session,plan,&moved)==IFS_FS_IO_ERROR);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(core->unmount(session)==IFS_FS_OK);
+    media.fail_flush=0u;
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_BUSY && !session);
+    CHECK(core->mount(&h,&session,&info)==IFS_FS_OK && session);
+    CHECK(core->stat(session,"/A.BIN",&entry)!=IFS_FS_OK);
+    uint64_t repaired=0u;
+    CHECK(map->recover(session,0u,&repaired)==IFS_FS_OK && repaired);
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    CHECK(map->plan(session,"/",10u,&plan)==IFS_FS_OK && plan);
+    CHECK(map->execute(session,plan,&moved)==IFS_FS_OK);
+    CHECK(map->verify(session,plan)==IFS_FS_OK);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(core->unmount(session)==IFS_FS_OK);
+    CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK && session);
+    for(unsigned i=0u;i<4u;++i) {
+        CHECK(core->read(session,"/A.BIN",(uint64_t)i*sizeof(a),copy,sizeof(copy))==IFS_FS_OK);
+        CHECK(!memcmp(a,copy,sizeof(a)));
+        CHECK(core->read(session,"/B.BIN",(uint64_t)i*sizeof(b),copy,sizeof(copy))==IFS_FS_OK);
+        CHECK(!memcmp(b,copy,sizeof(b)));
+    }
+    CHECK(map->map(session,"/A.BIN",0u,ex,2u,&written)==IFS_FS_OK && written==2u);
+    CHECK(ex[1].physical_offset==ex[0].physical_offset+ex[0].length);
+    CHECK(core->read(session,"/Dir/Sub/Leaf.bin",0u,copy,sizeof(nested))==IFS_FS_OK &&
+          !memcmp(copy,nested,sizeof(nested)));
+    CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    CHECK(!allocation_test(session,media.size,info.free_bytes));
+    CHECK(core->unmount(session)==IFS_FS_OK);
     result=0;
 done:
     free(media.bytes);return result;
@@ -327,9 +363,9 @@ int main(void)
        !core->create || core->remove || core->truncate ||
        !volume || !volume->query || !volume->sync ||
        !volume->format || !volume->check || volume->repair ||
-       !defrag || defrag->header.capabilities!=(IFS_FS_DEFRAG_MAP|IFS_FS_DEFRAG_PLAN) ||
-       !defrag->map || !defrag->plan || defrag->execute || defrag->verify ||
-       defrag->recover || !defrag->release_plan ||
+       !defrag || defrag->header.capabilities!=IFS_FS_DEFRAG_ALL ||
+       !defrag->map || !defrag->plan || !defrag->execute || !defrag->verify ||
+       !defrag->recover || !defrag->release_plan ||
        (api->runtime_profiles & IFS_FS_PROFILE_KERNEL) ||
        api->group_mask!=(IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
                         IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|
