@@ -184,6 +184,20 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->create(session,"/A.BIN",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
     CHECK(core->create(session,"/B.BIN",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
     CHECK(core->create(session,"/a.bin",IFS_FS_ENTRY_FILE)==IFS_FS_EXISTS);
+    unsigned before=media.writes;
+    CHECK(core->create(session,"/Missing/No.bin",IFS_FS_ENTRY_FILE)==IFS_FS_NOT_FOUND);
+    CHECK(core->create(session,"/A.BIN/No.bin",IFS_FS_ENTRY_FILE)==IFS_FS_INVALID);
+    CHECK(core->create(session,"/Bad/",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_INVALID);
+    CHECK(media.writes==before);
+    CHECK(core->create(session,"/Dir",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_OK);
+    CHECK(core->create(session,"/dir/Sub",IFS_FS_ENTRY_DIRECTORY)==IFS_FS_OK);
+    CHECK(core->create(session,"/DIR/sub/Leaf.bin",IFS_FS_ENTRY_FILE)==IFS_FS_OK);
+    CHECK(core->create(session,"/Dir/Sub/leaf.BIN",IFS_FS_ENTRY_FILE)==IFS_FS_EXISTS);
+    CHECK(core->directory_entry(session,"/Dir/Sub",0u,&entry)==IFS_FS_OK &&
+          entry.type==IFS_FS_ENTRY_FILE && !strcmp(entry.name,"Leaf.bin"));
+    CHECK(core->directory_entry(session,"/Dir/Sub",1u,&entry)==IFS_FS_END);
+    const uint8_t nested[]={0,0x31,0x7f,0xff};
+    CHECK(core->write(session,"/Dir/Sub/Leaf.bin",0u,nested,sizeof(nested))==IFS_FS_OK);
     uint8_t a[65536],b[65536],copy[65536];
     memset(a,0x35,sizeof(a));memset(b,0x78,sizeof(b));
     for(unsigned i=0;i<4u;++i) {
@@ -193,6 +207,10 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(core->unmount(session)==IFS_FS_OK);
     CHECK(core->mount(&ro,&session,&info)==IFS_FS_OK);
     CHECK(core->stat(session,"/A.BIN",&entry)==IFS_FS_OK && entry.size_bytes==4u*sizeof(a));
+    CHECK(core->stat(session,"/dir/sub",&entry)==IFS_FS_OK && entry.type==IFS_FS_ENTRY_DIRECTORY);
+    CHECK(core->stat(session,"/dir/sub/leaf.bin",&entry)==IFS_FS_OK && entry.size_bytes==sizeof(nested));
+    CHECK(core->read(session,"/Dir/Sub/Leaf.bin",0u,copy,sizeof(nested))==IFS_FS_OK &&
+          !memcmp(copy,nested,sizeof(nested)));
     for(unsigned i=0;i<4u;++i) {
         CHECK(core->read(session,"/A.BIN",(uint64_t)i*sizeof(a),copy,sizeof(copy))==IFS_FS_OK);
         CHECK(!memcmp(a,copy,sizeof(a)));
@@ -203,6 +221,16 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     IfsFsExtentV2 ex[2];uint32_t written=0;
     CHECK(map->map(session,"/A.BIN",127u,ex,2,&written)==IFS_FS_OK && written==2u);
     CHECK(ex[1].physical_offset!=ex[0].physical_offset+ex[0].length);
+    /* A page crossing a T_LIST boundary must produce exactly the same
+     * physical results as separately requested single-block pages. */
+    IfsFsExtentV2 batch[64],single;
+    CHECK(map->map(session,"/A.BIN",70u,batch,64u,&written)==IFS_FS_OK && written==64u);
+    for(uint32_t i=0u;i<64u;++i) {
+        CHECK(map->map(session,"/A.BIN",70u+i,&single,1u,&written)==IFS_FS_OK && written==1u);
+        CHECK(batch[i].logical_offset==single.logical_offset &&
+              batch[i].physical_offset==single.physical_offset &&
+              batch[i].length==single.length);
+    }
     CHECK(!allocation_test(session,media.size,info.free_bytes));
     CHECK(core->unmount(session)==IFS_FS_OK);
     result=0;

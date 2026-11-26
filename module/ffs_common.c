@@ -734,33 +734,60 @@ static int grow_allocated(FfsTxn *t,uint32_t n)
 static int grow_create(void *volume,const char *path,uint32_t type)
 {
     int rc=grow_profile(volume);if(rc!=IFS_FS_OK)return rc;
-    if(type!=IFS_FS_ENTRY_FILE || !path || path[0]!='/' || !path[1] ||
-       strchr(path+1,'/') || !strcmp(path,"/.") || !strcmp(path,"/.."))
+    if(type!=IFS_FS_ENTRY_FILE && type!=IFS_FS_ENTRY_DIRECTORY)
         return IFS_FS_UNSUPPORTED;
-    size_t bytes=strlen(path+1);
-    if(bytes>60u)return IFS_FS_INVALID;
+    if(!path || path[0]!='/' || !path[1])return IFS_FS_INVALID;
+    const char *slash=strrchr(path,'/');
+    const char *leaf=slash+1;
+    const size_t bytes=strlen(leaf);
+    if(!bytes || bytes>60u || !strcmp(leaf,".") || !strcmp(leaf,".."))
+        return IFS_FS_INVALID;
     uint8_t name[31];uint32_t n;
-    rc=utf8_to_latin1(path+1,(uint32_t)bytes,name,&n);
+    rc=utf8_to_latin1(leaf,(uint32_t)bytes,name,&n);
     if(rc!=IFS_FS_OK)return rc;
     if(ifs_ffs_validate_name(name,n,1)!=IFS_FFS_NAME_OK)return IFS_FS_INVALID;
-    IfsFfsDropInEntry found={0};const char *base;uint32_t len;
-    last_read_error=IFS_FS_OK;rc=path_entry(path,&found,&base,&len);
-    if(rc==IFS_FS_OK)return IFS_FS_EXISTS;
-    if(rc!=IFS_FS_NOT_FOUND)return rc;
-    FfsTxn t={.hint=s.growth_hint};FfsPatch *root,*file;
-    rc=grow_patch(&t,s.v.root_block,&root);if(rc!=IFS_FS_OK)goto done;
-    if(!bitmap_checksum(root->now,128u) || bitmap_word(root->now,78u)!=UINT32_MAX) {
+    const IfsFfsDropInModule *native=ifs_ffs_native_read_ops();
+    IfsFfsDropInEntry parent=native->root(&s.v),found={0};
+    last_read_error=IFS_FS_OK;
+    /* Resolve the actual native parent, never interpret a slash-containing
+     * leaf as a root filename. Missing/non-directory parents cannot allocate. */
+    if(slash!=path) {
+        const size_t length=(size_t)(slash-path);
+        if(length>=4096u)return IFS_FS_INVALID;
+        char *prefix=s.io.allocate(s.io.context,length+1u);
+        if(!prefix)return IFS_FS_NO_MEMORY;
+        memcpy(prefix,path,length);prefix[length]=0;
+        const char *base;uint32_t len;
+        rc=path_entry(prefix,&parent,&base,&len);
+        s.io.release(s.io.context,prefix);
+        if(rc!=IFS_FS_OK)return rc;
+        if(parent.type!=IFS_FFS_DIRECTORY)return IFS_FS_INVALID;
+    }
+    rc=native->lookup(&s.v,&parent,name,n,&found);
+    if(!rc)return IFS_FS_EXISTS;
+    if(rc!=1)return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+    FfsTxn t={.hint=s.growth_hint};FfsPatch *dir,*file;
+    if(parent.block!=s.v.root_block) {
+        rc=grow_allocated(&t,parent.block);if(rc!=IFS_FS_OK)goto done;
+    }
+    rc=grow_patch(&t,parent.block,&dir);if(rc!=IFS_FS_OK)goto done;
+    if(!bitmap_checksum(dir->now,128u) || bitmap_word(dir->now,0u)!=2u ||
+       (parent.block==s.v.root_block ?
+        (bitmap_word(dir->now,127u)!=1u || bitmap_word(dir->now,78u)!=UINT32_MAX) :
+        (bitmap_word(dir->now,127u)!=2u || bitmap_word(dir->now,1u)!=parent.block))) {
         rc=IFS_FS_CORRUPT;goto done;
     }
     rc=grow_alloc(&t,&file);if(rc!=IFS_FS_OK)goto done;
     const uint32_t bucket=ifs_ffs_directory_hash(name,n,72u,0);
     grow_word(file->now,0,2u);grow_word(file->now,1,file->number);
-    grow_word(file->now,124,bitmap_word(root->now,6u+bucket));
-    grow_word(file->now,125,s.v.root_block);
-    grow_word(file->now,127,(uint32_t)-3);
+    grow_word(file->now,124,bitmap_word(dir->now,6u+bucket));
+    grow_word(file->now,125,parent.block);
+    /* A user directory is a native T_SHORT/ST_USERDIR hash table. The
+     * zeroed allocation has no children, unlike a regular file header. */
+    grow_word(file->now,127,type==IFS_FS_ENTRY_DIRECTORY?2u:(uint32_t)-3);
     file->now[432]=(uint8_t)n;memcpy(file->now+433,name,n);
     grow_checksum(file->now,5);file->dirty=1;
-    grow_word(root->now,6u+bucket,file->number);grow_checksum(root->now,5);root->dirty=1;
+    grow_word(dir->now,6u+bucket,file->number);grow_checksum(dir->now,5);dir->dirty=1;
     rc=grow_commit(&t);
 done:
     grow_release(&t);return rc;
@@ -928,13 +955,13 @@ static int map_file(void *volume,const char *path,uint64_t first,
     if(first>=total)return IFS_FS_END;
     count=total-first;
     if(count>capacity)count=capacity;
+    /* Resolve a whole page with a single native extension-chain walk.
+     * Restarting at the file header for each block was quadratic in
+     * the number of continuation pages for large fragmented files. */
+    if(ifs_ffs_data_blocks(&s.v,&file,(uint32_t)first,(uint32_t)count,physical)!=0)
+        return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
     for(uint64_t i=0u;i<count;++i) {
-        uint64_t offset;
-        if(ifs_ffs_data_block(&s.v,&file,(uint32_t)(first+i),
-                              &physical[i])!=0)
-            return last_read_error!=IFS_FS_OK?
-                last_read_error:IFS_FS_CORRUPT;
-        offset=(uint64_t)physical[i]*s.v.io.block_bytes;
+        uint64_t offset=(uint64_t)physical[i]*s.v.io.block_bytes;
         if(offset>=s.v.io.volume_bytes ||
            s.v.io.block_bytes>s.v.io.volume_bytes-offset)
             return IFS_FS_CORRUPT;

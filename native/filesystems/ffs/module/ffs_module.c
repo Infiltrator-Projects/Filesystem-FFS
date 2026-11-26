@@ -275,6 +275,19 @@ int ifs_ffs_data_block(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *fil
     return data_pointer(v, file->block, &p, logical, physical);
 }
 
+/* Resolve consecutive logical blocks using one validated native cursor.
+ * Private engine helper; the external ABI remains exclusively Common V2. */
+int ifs_ffs_data_blocks(const IfsFfsDropInVolume *v,const IfsFfsDropInEntry *file,
+                        uint32_t first,uint32_t count,uint32_t *physical)
+{
+    PointerPage p;
+    if(!physical || !count || first_page(v,file,&p) ||
+       first>=p.data_blocks || count>p.data_blocks-first)return -1;
+    for(uint32_t i=0u;i<count;++i)
+        if(data_pointer(v,file->block,&p,first+i,&physical[i]))return -1;
+    return 0;
+}
+
 static int module_read(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)
 {
