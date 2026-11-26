@@ -310,6 +310,26 @@ int ifs_ffs_visit_file_blocks(const IfsFfsDropInVolume *v,
     return 0;
 }
 
+/* One validated chain walk determines the existing physical layout.
+ * Contiguity is a native block relation, never a host-supplied hint. */
+int ifs_ffs_file_layout(const IfsFfsDropInVolume *v,const IfsFfsDropInEntry *file,
+                         uint32_t *first,uint32_t *count,int *contiguous)
+{
+    PointerPage p;
+    if(!first || !count || !contiguous || first_page(v,file,&p))return -1;
+    uint32_t start=0u,previous=0u;
+    int packed=1;
+    for(uint32_t i=0u;i<p.data_blocks;++i) {
+        uint32_t physical;
+        if(data_pointer(v,file->block,&p,i,&physical))return -1;
+        if(!i)start=physical;
+        else if(physical!=previous+1u)packed=0;
+        previous=physical;
+    }
+    *first=start;*count=p.data_blocks;*contiguous=packed;
+    return 0;
+}
+
 static int module_read(const IfsFfsDropInVolume *v, const IfsFfsDropInEntry *file,
                        uint32_t position, void *output, uint32_t length)
 {

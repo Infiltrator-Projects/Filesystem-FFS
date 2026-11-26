@@ -235,6 +235,23 @@ static int format_test(const IfsFsCoreOpsV2 *core,const IfsFsVolumeOpsV2 *vol,
     CHECK(!allocation_test(session,media.size,info.free_bytes));
     uint64_t errors=UINT64_MAX;
     CHECK(vol->check(session,0u,&errors)==IFS_FS_OK && !errors);
+    /* Real fragmented files, not synthetic extent declarations. Planning
+     * must use the verified native bitmap and leave every byte unchanged. */
+    void *plan=NULL;
+    before=media.writes;
+    CHECK(map->plan(session,"/",0u,&plan)==IFS_FS_OK && plan);
+    void *second=NULL;
+    CHECK(map->plan(session,"/",10u,&second)==IFS_FS_BUSY && !second);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(map->plan(session,"/",10u,&plan)==IFS_FS_OK && plan);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(map->plan(session,"/A.BIN",10u,&plan)==IFS_FS_OK && plan);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(map->plan(session,"/Dir",0u,&plan)==IFS_FS_OK && plan);
+    map->release_plan(session,plan);plan=NULL;
+    CHECK(map->plan(session,"/Missing",0u,&plan)==IFS_FS_NOT_FOUND && !plan);
+    CHECK(map->plan(session,"/",5u,&plan)==IFS_FS_INVALID && !plan);
+    CHECK(media.writes==before);
     /* Forge a checksum-valid bitmap that frees a file data block. The
      * ownership check must reject it even though metadata is still valid. */
     const uint32_t data_block=(uint32_t)(batch[0].physical_offset/512u);
@@ -310,9 +327,9 @@ int main(void)
        !core->create || core->remove || core->truncate ||
        !volume || !volume->query || !volume->sync ||
        !volume->format || !volume->check || volume->repair ||
-       !defrag || defrag->header.capabilities!=IFS_FS_DEFRAG_MAP ||
-       !defrag->map || defrag->plan || defrag->execute || defrag->verify ||
-       defrag->recover || defrag->release_plan ||
+       !defrag || defrag->header.capabilities!=(IFS_FS_DEFRAG_MAP|IFS_FS_DEFRAG_PLAN) ||
+       !defrag->map || !defrag->plan || defrag->execute || defrag->verify ||
+       defrag->recover || !defrag->release_plan ||
        (api->runtime_profiles & IFS_FS_PROFILE_KERNEL) ||
        api->group_mask!=(IFS_FS_GROUP_BIT(IFS_FS_GROUP_CORE)|
                         IFS_FS_GROUP_BIT(IFS_FS_GROUP_VOLUME)|

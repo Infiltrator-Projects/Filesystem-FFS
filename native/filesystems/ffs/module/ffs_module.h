@@ -97,4 +97,7 @@ int ifs_ffs_data_blocks(const IfsFfsDropInVolume *, const IfsFfsDropInEntry *,
 int ifs_ffs_visit_file_blocks(const IfsFfsDropInVolume *,
                              const IfsFfsDropInEntry *,
                              int (*visit)(void *,uint32_t),void *opaque);
+int ifs_ffs_file_layout(const IfsFfsDropInVolume *,
+                         const IfsFfsDropInEntry *,uint32_t *first,
+                         uint32_t *count,int *contiguous);
 #endif

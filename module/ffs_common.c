@@ -24,6 +24,10 @@ static int v2_leave_operation(int rc)
     return rc;
 }
 
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+typedef struct FfsRelocationPlan FfsRelocationPlan;
+static void free_relocation_plan(FfsRelocationPlan *);
+#endif
 static struct {
     IfsFfsDropInVolume v;
     IfsFsHostRuntimeV2 io;
@@ -32,6 +36,9 @@ static struct {
     int mounted;
     int growth_ready,write_fault;
     uint32_t growth_first,growth_hint;
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+    FfsRelocationPlan *plan;
+#endif
 } s;
 /* The native FFS reader returns 0/-1. Preserve the precise Common V2
  * host failure instead of treating an unavailable sector as missing files,
@@ -423,6 +430,9 @@ static int guarded_mount(const IfsFsHostRuntimeV2 *h,void **volume,
 
 static int unmount(void *volume){
     if(!live(volume))return IFS_FS_INVALID;
+    #if !defined(IFS_FFS_FIRMWARE_BUILD)
+    if(s.plan){free_relocation_plan(s.plan);s.plan=NULL;}
+    #endif
     s.v.mounted=0u;s.mounted=0;s.handle=0;
     return IFS_FS_OK;
 }
@@ -993,10 +1003,21 @@ static int guarded_map_file(void *volume,const char *path,uint64_t first,
     return v2_leave_operation(map_file(volume,path,first,out,capacity,written));
 }
 
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+static int guarded_relocation_plan(void *,const char *,uint32_t,void **);
+static void guarded_release_relocation_plan(void *,void *);
+#endif
 static const IfsFsDefragOpsV2 defrag_map_ops={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsDefragOpsV2),
-             IFS_FS_GROUP_DEFRAG,0u,IFS_FS_DEFRAG_MAP},
+             IFS_FS_GROUP_DEFRAG,0u,IFS_FS_DEFRAG_MAP
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+             |IFS_FS_DEFRAG_PLAN
+#endif
+    },
     .map=guarded_map_file
+#if !defined(IFS_FFS_FIRMWARE_BUILD)
+    ,.plan=guarded_relocation_plan,.release_plan=guarded_release_relocation_plan
+#endif
 };
 static const IfsFsCoreOpsV2 core={
     .header={IFS_FS_GROUP_ABI_V2,sizeof(IfsFsCoreOpsV2),
@@ -1286,6 +1307,190 @@ static int guarded_integrity_check(void *volume,uint32_t flags,uint64_t *errors)
     if(errors)*errors=0u;
     if(!v2_enter_operation())return IFS_FS_BUSY;
     return v2_leave_operation(integrity_check(volume,flags,errors));
+}
+
+/* Native, read-only planning. The bitmap and namespace are verified before
+ * any placement decision. Only genuinely free blocks are chosen as new
+ * destinations; the original data remains allocated throughout planning.
+ * This is a conservative copy-before-switch strategy. A future durable
+ * execution transaction must revalidate this plan under a writable lease.
+ * No EXECUTE, VERIFY or RECOVER capability is claimed by this planner. */
+typedef struct {
+    uint32_t header,source_first,destination,blocks,reserve;
+    uint32_t bytes;
+    int relocate;
+} FfsRelocationEntry;
+struct FfsRelocationPlan {
+    uintptr_t generation;
+    uint32_t policy;
+    size_t count,capacity;
+    FfsRelocationEntry *entries;
+};
+typedef struct {
+    FfsRelocationPlan *plan;
+    uint8_t *free;
+} FfsPlanner;
+static void free_relocation_plan(FfsRelocationPlan *plan)
+{
+    if(!plan)return;
+    if(plan->entries)s.io.release(s.io.context,plan->entries);
+    s.io.release(s.io.context,plan);
+}
+static int planner_free(const FfsPlanner *p,uint32_t block)
+{
+    return (p->free[block/8u]&(1u<<(block%8u)))!=0u;
+}
+static void planner_take(FfsPlanner *p,uint32_t first,uint32_t count)
+{
+    for(uint32_t i=0u;i<count;++i) {
+        const uint32_t block=first+i;
+        p->free[block/8u]&=(uint8_t)~(1u<<(block%8u));
+    }
+}
+static int planner_run(FfsPlanner *p,uint32_t count,uint32_t *first)
+{
+    uint32_t start=2u,run=0u;
+    for(uint32_t block=2u;block<s.v.blocks;++block) {
+        if(!(block%4096u) && s.io.cancelled && s.io.cancelled(s.io.context))
+            return IFS_FS_BUSY;
+        if(planner_free(p,block)) {
+            if(!run)start=block;
+            if(++run==count){*first=start;return IFS_FS_OK;}
+        } else run=0u;
+    }
+    return IFS_FS_NO_SPACE;
+}
+static int planner_append(FfsPlanner *p,FfsRelocationEntry entry)
+{
+    FfsRelocationPlan *plan=p->plan;
+    if(plan->count==plan->capacity) {
+        const size_t next=plan->capacity?plan->capacity*2u:32u;
+        if(next<=plan->capacity || next>SIZE_MAX/sizeof(*plan->entries))
+            return IFS_FS_NO_MEMORY;
+        FfsRelocationEntry *entries=s.io.allocate(s.io.context,next*sizeof(*entries));
+        if(!entries)return IFS_FS_NO_MEMORY;
+        if(plan->count)memcpy(entries,plan->entries,plan->count*sizeof(*entries));
+        if(plan->entries)s.io.release(s.io.context,plan->entries);
+        plan->entries=entries;plan->capacity=next;
+    }
+    plan->entries[plan->count++]=entry;
+    return IFS_FS_OK;
+}
+static int planner_file(FfsPlanner *p,const IfsFfsDropInEntry *file)
+{
+    uint32_t first=0u,blocks=0u;
+    int packed=0;
+    last_read_error=IFS_FS_OK;
+    if(ifs_ffs_file_layout(&s.v,file,&first,&blocks,&packed))
+        return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+    if(!blocks)return IFS_FS_OK;
+    const uint32_t reserve=p->plan->policy?(blocks/10u+(blocks%10u!=0u)):0u;
+    if(blocks>UINT32_MAX-reserve)return IFS_FS_NO_SPACE;
+    uint32_t destination=first;
+    /* Preserve a file already satisfying the policy, but reserve the
+     * adjacent gap in the private planning bitmap so later files cannot
+     * overlap it. The native allocation bitmap is never modified here. */
+    int retain=packed;
+    if(retain && reserve) {
+        const uint64_t end=(uint64_t)first+blocks;
+        if(end>s.v.blocks || reserve>s.v.blocks-end)retain=0;
+        else for(uint32_t j=0u;j<reserve;++j)
+            if(!planner_free(p,(uint32_t)end+j)){retain=0;break;}
+    }
+    if(retain) {
+        if(reserve)planner_take(p,first+blocks,reserve);
+    } else {
+        int rc=planner_run(p,blocks+reserve,&destination);
+        if(rc!=IFS_FS_OK)return rc;
+        planner_take(p,destination,blocks+reserve);
+    }
+    return planner_append(p,(FfsRelocationEntry){
+        file->block,first,destination,blocks,reserve,file->size,!retain});
+}
+static int planner_directory(FfsPlanner *p,const IfsFfsDropInEntry *dir,
+                              unsigned depth)
+{
+    if(depth>64u)return IFS_FS_UNSUPPORTED;
+    IfsFfsDropInDirCursor cursor={0};
+    const IfsFfsDropInModule *native=ifs_ffs_native_read_ops();
+    for(;;) {
+        IfsFfsDropInEntry child={0};uint8_t name[31];
+        if(s.io.cancelled && s.io.cancelled(s.io.context))return IFS_FS_BUSY;
+        last_read_error=IFS_FS_OK;
+        int rc=native->next(&s.v,dir,&cursor,&child,name);
+        if(rc==1)return IFS_FS_OK;
+        if(rc)return last_read_error!=IFS_FS_OK?last_read_error:IFS_FS_CORRUPT;
+        rc=child.type==IFS_FFS_DIRECTORY?planner_directory(p,&child,depth+1u):
+            planner_file(p,&child);
+        if(rc!=IFS_FS_OK)return rc;
+    }
+}
+static int relocation_plan(void *volume,const char *path,uint32_t policy,void **out)
+{
+    if(!out)return IFS_FS_INVALID;
+    *out=NULL;
+    if(!live(volume) || !path || (policy!=0u && policy!=10u))return IFS_FS_INVALID;
+    if(s.plan)return IFS_FS_BUSY;
+    uint64_t errors=0u;
+    int rc=integrity_check(volume,0u,&errors);
+    if(rc!=IFS_FS_OK)return rc;
+    IfsFfsDropInEntry target={0};const char *name;uint32_t length;
+    last_read_error=IFS_FS_OK;
+    rc=path_entry(path,&target,&name,&length);
+    if(rc!=IFS_FS_OK)return rc;
+    const uint32_t bs=s.v.io.block_bytes,words=bs/4u,bits=(words-1u)*32u;
+    const uint64_t span=(uint64_t)s.v.blocks-2u,maps=(span+bits-1u)/bits;
+    const uint64_t bitmap_bytes=((uint64_t)s.v.blocks+7u)/8u;
+    if(!maps || maps>SIZE_MAX/sizeof(uint32_t) || bitmap_bytes>SIZE_MAX)
+        return IFS_FS_NO_MEMORY;
+    uint32_t *keys=s.io.allocate(s.io.context,(size_t)maps*sizeof(*keys));
+    uint8_t *bitmap=s.io.allocate(s.io.context,(size_t)bitmap_bytes);
+    uint8_t *page=s.io.allocate(s.io.context,bs);
+    FfsRelocationPlan *plan=s.io.allocate(s.io.context,sizeof(*plan));
+    if(plan)*plan=(FfsRelocationPlan){.generation=s.generation,.policy=policy};
+    rc=IFS_FS_NO_MEMORY;
+    if(!keys || !bitmap || !page || !plan)goto done;
+    memset(bitmap,0,(size_t)bitmap_bytes);
+    uint64_t free_bytes=0u;
+    rc=scan_free_bytes(&free_bytes,keys,NULL);
+    if(rc!=IFS_FS_OK)goto done;
+    for(uint64_t i=0u;i<maps;++i) {
+        if(s.io.cancelled && s.io.cancelled(s.io.context)){rc=IFS_FS_BUSY;goto done;}
+        rc=bitmap_read(keys[i],page);
+        if(rc!=IFS_FS_OK)goto done;
+        if(!bitmap_checksum(page,words)){rc=IFS_FS_CORRUPT;goto done;}
+        const uint64_t start=i*bits;
+        const uint32_t valid=(uint32_t)(span-start<bits?span-start:bits);
+        for(uint32_t bit=0u;bit<valid;++bit)
+            if(bitmap_word(page,1u+bit/32u)&(UINT32_C(1)<<(bit%32u))) {
+                const uint32_t block=(uint32_t)(start+bit+2u);
+                bitmap[block/8u]|=(uint8_t)(1u<<(block%8u));
+            }
+    }
+    FfsPlanner planner={plan,bitmap};
+    rc=target.type==IFS_FFS_DIRECTORY?planner_directory(&planner,&target,0u):
+        planner_file(&planner,&target);
+    if(rc==IFS_FS_OK){s.plan=plan;*out=plan;plan=NULL;}
+done:
+    free_relocation_plan(plan);
+    if(page)s.io.release(s.io.context,page);
+    if(bitmap)s.io.release(s.io.context,bitmap);
+    if(keys)s.io.release(s.io.context,keys);
+    return rc;
+}
+static int guarded_relocation_plan(void *volume,const char *path,uint32_t policy,void **out)
+{
+    if(out)*out=NULL;
+    if(!v2_enter_operation())return IFS_FS_BUSY;
+    return v2_leave_operation(relocation_plan(volume,path,policy,out));
+}
+static void guarded_release_relocation_plan(void *volume,void *plan)
+{
+    if(!v2_enter_operation())return;
+    if(live(volume) && plan && s.plan==plan) {
+        free_relocation_plan(s.plan);s.plan=NULL;
+    }
+    (void)v2_leave_operation(IFS_FS_OK);
 }
 #endif
 
