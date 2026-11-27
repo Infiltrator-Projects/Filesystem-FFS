@@ -85,7 +85,7 @@ DOS5 cache records require consistent ownership, names, size, dates, protection 
 
 A correct FFS implementation verifies and preserves metadata and allocation checksums, root discovery and bitmap accounting; supports files crossing pointer-extension boundaries; reads/writes the full `B`-byte payload; handles directory hash collisions, rename and deletion; and rejects damaged or foreign media without reinterpreting it.
 
-Before adding writable `DOS\7` support, test NaC names at 30, 31 and 106 characters, comment overflow allocation/free, Latin-1 hash chains, root signature and used-block counter updates, and actual reader/writer interoperability. As with OFS, a successful build, trivial empty image or passing self-verifier does not alone establish historic AmigaOS compatibility.
+A successful build, trivial empty image or passing self-verifier does not alone establish historic AmigaOS compatibility. The qualification checklist below includes the required DOS7 interoperability cases.
 
 At the documented source baseline 51ae5996ff53, Common V2 source in module/ffs_common.c accepts only DOS1, DOS3 and DOS5 in detect(); DOS7 is rejected. The formatter accepts DOS1 (or default selector 0), 512-byte logical sectors and volumes from 1024 to 4194304 blocks (512 KiB to 2 GiB). Creation and growth are restricted to DOS1 and the formatter's supported geometry. DOS3/DOS5 overwrites are limited to existing file extents; do not advertise general namespace/cache mutation. Core, volume and defrag-map groups are exported; mapping is not relocation. Format-level support and provider operation support are not equivalent.
 

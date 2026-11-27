@@ -269,11 +269,9 @@
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 698 Td (pointer-extension boundaries; reads/writes the full B-byte payload; handles) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 685 Td (directory hash collisions, rename and deletion; and rejects damaged or foreign) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 672 Td (media without reinterpreting it.) Tj ET
-0.08 0.12 0.17 rg BT /F3 10 Tf 43 654 Td (Before adding writable DOS\\7 support, test NaC names at 30, 31 and 106 characters,) Tj ET
-0.08 0.12 0.17 rg BT /F3 10 Tf 43 641 Td (comment overflow allocation/free, Latin-1 hash chains, root signature and) Tj ET
-0.08 0.12 0.17 rg BT /F3 10 Tf 43 628 Td (used-block counter updates, and actual reader/writer interoperability. As with OFS,) Tj ET
-0.08 0.12 0.17 rg BT /F3 10 Tf 43 615 Td (a successful build, trivial empty image or passing self-verifier does not alone) Tj ET
-0.08 0.12 0.17 rg BT /F3 10 Tf 43 602 Td (establish historic AmigaOS compatibility.) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 654 Td (A successful build, trivial empty image or passing self-verifier does not alone) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 641 Td (establish historic AmigaOS compatibility. The qualification checklist below) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 628 Td (includes the required DOS7 interoperability cases.) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 584 Td (At the documented source baseline 51ae5996ff53, Common V2 source in) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 571 Td (module/ffs_common.c accepts only DOS1, DOS3 and DOS5 in detect\(\); DOS7 is rejected.) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 558 Td (The formatter accepts DOS1 \(or default selector 0\), 512-byte logical sectors and) Tj ET
