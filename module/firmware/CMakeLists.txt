@@ -17,9 +17,12 @@ target_compile_features(ffs-boot PRIVATE c_std_11)
 target_include_directories(ffs-boot PRIVATE
  "${COMMON_INCLUDE_DIR}" ../../native/filesystems/ffs/module)
 target_compile_definitions(ffs-boot PRIVATE IFS_FFS_FIRMWARE_BUILD=1)
+# Firmware uses AMD64 SysV without CET, SIMD state assumptions,
+# packed relative relocations or non-4-KiB load alignment. Hosted builds
+# retain their separate native optimization profile.
 target_compile_options(ffs-boot PRIVATE
  -Wall -Wextra -Wpedantic -Werror -ffreestanding -fno-builtin
- -fno-tree-loop-distribute-patterns -fno-stack-protector -mno-red-zone
+ -fno-tree-loop-distribute-patterns -fno-stack-protector -mno-red-zone -fcf-protection=none -mgeneral-regs-only
  -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0)
 target_link_options(ffs-boot PRIVATE
- -nostdlib -Wl,-Bsymbolic,-z,defs,-z,noexecstack,-z,relro,-z,now)
+ -nostdlib -Wl,-z,nopack-relative-relocs,-z,max-page-size=4096,-Bsymbolic,-z,defs,-z,noexecstack,-z,relro,-z,now)
