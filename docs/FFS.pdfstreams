@@ -11,6 +11,11 @@
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 646 Td (7. Directory cache and long-name variants) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 633 Td (8. Provider conformance and qualification) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 620 Td (9. Original sources and historical references) Tj ET
+0.08 0.12 0.17 rg BT /F2 13 Tf 43 584 Td (Scope) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 560 Td (One format reference covering four FFS variants, their historical development,) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 547 Td (original on-media structures, algorithms and implementation requirements.) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 534 Td (Historical handler support and theoretical format limits do not establish) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 521 Td (current provider qualification.) Tj ET
 0.35 0.39 0.43 rg BT /F1 9 Tf 43 35 Td (Historical development and engineering reference | 1) Tj ET
 %%Page
 0.07 0.13 0.20 rg 0 785 595 57 re f

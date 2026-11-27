@@ -18,7 +18,7 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents 7 0 R >>
 endobj
 7 0 obj
-<< /Length 1085 >>
+<< /Length 1595 >>
 stream
 0.07 0.13 0.20 rg 0 785 595 57 re f
 1 1 1 rg BT /F2 15 Tf 43 810 Td (FFS | TECHNICAL REFERENCE) Tj ET
@@ -33,6 +33,11 @@ stream
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 646 Td (7. Directory cache and long-name variants) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 633 Td (8. Provider conformance and qualification) Tj ET
 0.08 0.12 0.17 rg BT /F3 10 Tf 43 620 Td (9. Original sources and historical references) Tj ET
+0.08 0.12 0.17 rg BT /F2 13 Tf 43 584 Td (Scope) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 560 Td (One format reference covering four FFS variants, their historical development,) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 547 Td (original on-media structures, algorithms and implementation requirements.) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 534 Td (Historical handler support and theoretical format limits do not establish) Tj ET
+0.08 0.12 0.17 rg BT /F3 10 Tf 43 521 Td (current provider qualification.) Tj ET
 0.35 0.39 0.43 rg BT /F1 9 Tf 43 35 Td (Historical development and engineering reference | 1) Tj ET
 endstream
 endobj
@@ -432,28 +437,28 @@ xref
 0000000330 00000 n 
 0000000398 00000 n 
 0000000544 00000 n 
-0000001680 00000 n 
-0000001826 00000 n 
-0000004915 00000 n 
-0000005063 00000 n 
-0000007970 00000 n 
-0000008118 00000 n 
-0000014397 00000 n 
-0000014545 00000 n 
-0000015656 00000 n 
-0000015804 00000 n 
-0000018080 00000 n 
-0000018228 00000 n 
-0000020610 00000 n 
-0000020758 00000 n 
-0000025498 00000 n 
-0000025646 00000 n 
-0000030044 00000 n 
-0000030192 00000 n 
-0000034876 00000 n 
-0000035024 00000 n 
+0000002190 00000 n 
+0000002336 00000 n 
+0000005425 00000 n 
+0000005573 00000 n 
+0000008480 00000 n 
+0000008628 00000 n 
+0000014907 00000 n 
+0000015055 00000 n 
+0000016166 00000 n 
+0000016314 00000 n 
+0000018590 00000 n 
+0000018738 00000 n 
+0000021120 00000 n 
+0000021268 00000 n 
+0000026008 00000 n 
+0000026156 00000 n 
+0000030554 00000 n 
+0000030702 00000 n 
+0000035386 00000 n 
+0000035534 00000 n 
 trailer
 << /Size 28 /Root 1 0 R >>
 startxref
-38077
+38587
 %%EOF
