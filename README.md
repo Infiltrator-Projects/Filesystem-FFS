@@ -27,7 +27,6 @@ The target installation is `/System/Filesystems/FFS.so` and `/System/Resources/D
 ## 7. Technical references and provenance
 
 - [Provider implementation](module/ffs_common.c)
-- [Native design or source provenance](native/filesystems/ffs/FFS_SPECIFICATION.md)
 - [Migration and source history](docs/DEFRAg_MIGRATION.md)
 - [Plain-text PDF drawing source (not Apple Pages)](docs/FFS.pdfstreams) and [PDF](docs/FFS.pdf)
 - [Project philosophy](docs/PHILOSOPHY.md)
